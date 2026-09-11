@@ -27,6 +27,32 @@ public sealed class LanguageSwitcher
     }
 
 
+    //[StructLayout(LayoutKind.Sequential)]
+    //private struct INPUT
+    //{
+    //    public uint type;
+    //    public InputUnion U;
+    //}
+
+
+    //[StructLayout(LayoutKind.Explicit)]
+    //private struct InputUnion
+    //{
+    //    [FieldOffset(0)]
+    //    public KEYBDINPUT ki;
+    //}
+
+
+    //[StructLayout(LayoutKind.Sequential)]
+    //private struct KEYBDINPUT
+    //{
+    //    public ushort wVk;
+    //    public ushort wScan;
+    //    public uint dwFlags;
+    //    public uint time;
+    //    public UIntPtr dwExtraInfo;
+    //}
+
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT
     {
@@ -34,14 +60,29 @@ public sealed class LanguageSwitcher
         public InputUnion U;
     }
 
-
     [StructLayout(LayoutKind.Explicit)]
     private struct InputUnion
     {
         [FieldOffset(0)]
+        public MOUSEINPUT mi;
+
+        [FieldOffset(0)]
         public KEYBDINPUT ki;
+
+        [FieldOffset(0)]
+        public HARDWAREINPUT hi;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public UIntPtr dwExtraInfo;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct KEYBDINPUT
@@ -53,6 +94,13 @@ public sealed class LanguageSwitcher
         public UIntPtr dwExtraInfo;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HARDWAREINPUT
+    {
+        public uint uMsg;
+        public ushort wParamL;
+        public ushort wParamH;
+    }
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
@@ -160,14 +208,14 @@ public sealed class LanguageSwitcher
                 }
             }
 
-            MessageBox.Show(
-                $"HWND: 0x{window.ToInt64():X}\n" +
-                $"Thread ID: {threadId}\n" +
-                $"HKL: 0x{hkl.ToInt64():X}\n" +
-                $"Layout: {layout?.DisplayName ?? "UNKNOWN"}\n" +
-                $"Locale: {layout?.LocaleName ?? "UNKNOWN"}\n" +
-                $"System switch: {SystemSwitchShortcut}",
-                "KeyboardSwitcher diagnostic");
+            //MessageBox.Show(
+            //    $"HWND: 0x{window.ToInt64():X}\n" +
+            //    $"Thread ID: {threadId}\n" +
+            //    $"HKL: 0x{hkl.ToInt64():X}\n" +
+            //    $"Layout: {layout?.DisplayName ?? "UNKNOWN"}\n" +
+            //    $"Locale: {layout?.LocaleName ?? "UNKNOWN"}\n" +
+            //    $"System switch: {SystemSwitchShortcut}",
+            //    "KeyboardSwitcher diagnostic");
 
             return layout;
         }

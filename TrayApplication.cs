@@ -233,57 +233,61 @@ public sealed class TrayApplication : IDisposable
     // Language requested
     // ============================================================
 
-    private void OnLanguageRequested(
-        LanguageKey language)
+    private LanguageAction OnLanguageRequested(
+    LanguageKey language)
     {
-        bool success;
+        KeyboardLayout? current =
+            _languageSwitcher.CurrentLayout;
 
+        KeyboardLayout? target =
+            language switch
+            {
+                LanguageKey.English =>
+                    _layouts.English,
 
-        switch (language)
+                LanguageKey.Russian =>
+                    _layouts.Russian,
+
+                LanguageKey.Ukrainian =>
+                    _layouts.Ukrainian,
+
+                _ =>
+                    null
+            };
+
+        // Якщо цільова розкладка не знайдена —
+        // це має бути перемикання.
+        if (target == null)
+            return LanguageAction.SwitchLanguage;
+
+        // Якщо ми вже на потрібній мові,
+        // Caps+A/Z/Q працює як Shift+клавіша.
+        if (current != null &&
+            current.Hkl == target.Hkl)
         {
-            case LanguageKey.English:
-
-                success =
-                    _languageSwitcher
-                        .SwitchToEnglish();
-
-                break;
-
-
-            case LanguageKey.Russian:
-
-                success =
-                    _languageSwitcher
-                        .SwitchToRussian();
-
-                break;
-
-
-            case LanguageKey.Ukrainian:
-
-                success =
-                    _languageSwitcher
-                        .SwitchToUkrainian();
-
-                break;
-
-
-            default:
-
-                success = false;
-
-                break;
+            return LanguageAction.ShiftKey;
         }
 
+        // Інакше це команда перемикання мови.
+        bool success =
+            language switch
+            {
+                LanguageKey.English =>
+                    _languageSwitcher.SwitchToEnglish(),
 
-        // --------------------------------------------------------
-        // Тут поки нічого не показуємо користувачу.
-        //
-        // У майбутньому можна додати повідомлення,
-        // логування або індикатор.
-        // --------------------------------------------------------
+                LanguageKey.Russian =>
+                    _languageSwitcher.SwitchToRussian(),
+
+                LanguageKey.Ukrainian =>
+                    _languageSwitcher.SwitchToUkrainian(),
+
+                _ =>
+                    false
+            };
 
         _ = success;
+
+        return LanguageAction.SwitchLanguage;
     }
 
 
