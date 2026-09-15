@@ -1,194 +1,117 @@
 ﻿using System.Drawing;
+using System.Windows.Forms;
 
 namespace KeyboardSwitcher;
 
 public sealed class TrayApplication : IDisposable
 {
     private readonly KeyboardLayouts _layouts;
-
     private readonly LanguageSwitcher _languageSwitcher;
-
     private readonly KeyboardHook _keyboardHook;
-
     private readonly NotifyIcon _trayIcon;
-
     private readonly ToolStripMenuItem _startItem;
-
     private readonly ToolStripMenuItem _stopItem;
+
+    // Невидимий Control у UI-потоці.
+    // Використовується для BeginInvoke().
+    private readonly Control _uiInvoker;
+
+    // Таймер для Help після тривалого утримання CapsLock.
+    private readonly System.Windows.Forms.Timer _capsHelpTimer;
 
     private bool _disposed;
 
-
     public TrayApplication()
     {
-        // ========================================================
-        // 1. Знаходимо розкладки
-        // ========================================================
-
-        _layouts =
-            new KeyboardLayouts();
-
+        _layouts = new KeyboardLayouts();
 
         if (!_layouts.HasRequiredLanguages())
         {
-            string missing =
-                _layouts.GetMissingLanguages();
-
+            string missing = _layouts.GetMissingLanguages();
 
             MessageBox.Show(
                 "Не знайдено необхідні розкладки Windows:\r\n\r\n" +
                 missing,
-
                 "KeyboardSwitcher",
-
                 MessageBoxButtons.OK,
-
                 MessageBoxIcon.Error);
-
 
             throw new ApplicationException(
                 "Не знайдено необхідні розкладки.");
         }
 
+        _languageSwitcher = new LanguageSwitcher(_layouts);
+        _keyboardHook = new KeyboardHook();
 
-        // ========================================================
-        // 2. Створюємо компоненти
-        // ========================================================
+        // --------------------------------------------------------
+        // UI invoker
+        // --------------------------------------------------------
 
-        _languageSwitcher =
-            new LanguageSwitcher(
-                _layouts);
+        _uiInvoker = new Control();
+        _uiInvoker.CreateControl();
 
+        // --------------------------------------------------------
+        // Help timer
+        // --------------------------------------------------------
 
-        _keyboardHook =
-            new KeyboardHook();
+        _capsHelpTimer = new System.Windows.Forms.Timer
+        {
+            Interval = 2000
+        };
 
+        _capsHelpTimer.Tick += OnCapsHelpTimerTick;
 
-        // ========================================================
-        // 3. Підписуємося на команди hook
-        // ========================================================
+        // --------------------------------------------------------
+        // KeyboardHook events
+        // --------------------------------------------------------
 
-        _keyboardHook.LanguageRequested +=
-            OnLanguageRequested;
+        _keyboardHook.LanguageRequested += OnLanguageRequested;
 
+        _keyboardHook.CapsLockPressed += OnCapsLockPressed;
+        _keyboardHook.CapsLockReleased += OnCapsLockReleased;
+        _keyboardHook.CapsLockActivity += OnCapsLockActivity;
 
-        // ========================================================
-        // 4. Створюємо Tray icon
-        // ========================================================
+        // --------------------------------------------------------
+        // Tray icon
+        // --------------------------------------------------------
 
-        _trayIcon =
-            new NotifyIcon
-            {
-                Text = "KeyboardSwitcher",
+        _trayIcon = new NotifyIcon
+        {
+            Text = "KeyboardSwitcher",
+            Icon = SystemIcons.Application,
+            Visible = true
+        };
 
-                Icon =
-                    SystemIcons.Application,
+        var menu = new ContextMenuStrip();
 
-                Visible = true
-            };
+        _startItem = new ToolStripMenuItem("Start");
+        _stopItem = new ToolStripMenuItem("Stop");
+        var helpItem = new ToolStripMenuItem("Help");
+        var exitItem = new ToolStripMenuItem("Exit");
 
+        menu.Items.Add(_startItem);
+        menu.Items.Add(_stopItem);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(helpItem);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(exitItem);
 
-        // ========================================================
-        // Context menu
-        // ========================================================
+        _trayIcon.ContextMenuStrip = menu;
 
-        var menu =
-            new ContextMenuStrip();
+        _startItem.Click += (_, _) => Start();
+        _stopItem.Click += (_, _) => Stop();
+        helpItem.Click += (_, _) => ShowHelp();
+        exitItem.Click += (_, _) => Exit();
 
-
-        _startItem =
-            new ToolStripMenuItem(
-                "Start");
-
-
-        _stopItem =
-            new ToolStripMenuItem(
-                "Stop");
-
-
-        var helpItem =
-            new ToolStripMenuItem(
-                "Help");
-
-
-        var exitItem =
-            new ToolStripMenuItem(
-                "Exit");
-
-
-        menu.Items.Add(
-            _startItem);
-
-
-        menu.Items.Add(
-            _stopItem);
-
-
-        menu.Items.Add(
-            new ToolStripSeparator());
-
-
-        menu.Items.Add(
-            helpItem);
-
-
-        menu.Items.Add(
-            new ToolStripSeparator());
-
-
-        menu.Items.Add(
-            exitItem);
-
-
-        _trayIcon.ContextMenuStrip =
-            menu;
-
-
-        // ========================================================
-        // Menu events
-        // ========================================================
-
-        _startItem.Click +=
-            (_, _) => Start();
-
-
-        _stopItem.Click +=
-            (_, _) => Stop();
-
-
-        helpItem.Click +=
-            (_, _) => ShowHelp();
-
-
-        exitItem.Click +=
-            (_, _) => Exit();
-
-
-        // ========================================================
-        // Подвійний клік по іконці
-        // ========================================================
-
-        _trayIcon.DoubleClick +=
-            (_, _) => ShowHelp();
-
-
-        // ========================================================
-        // Початковий стан
-        // ========================================================
+        _trayIcon.DoubleClick += (_, _) => ShowHelp();
 
         UpdateMenu();
-
-
-        // ========================================================
-        // Автоматично запускаємо hook.
-        // ========================================================
 
         Start();
     }
 
-
     // ============================================================
-    // Start
+    // Start / Stop
     // ============================================================
 
     private void Start()
@@ -196,103 +119,197 @@ public sealed class TrayApplication : IDisposable
         if (_keyboardHook.IsRunning)
             return;
 
-
         if (!_keyboardHook.Start())
         {
             MessageBox.Show(
                 "Не вдалося встановити keyboard hook.",
-
                 "KeyboardSwitcher",
-
                 MessageBoxButtons.OK,
-
                 MessageBoxIcon.Error);
-
 
             return;
         }
 
-
         UpdateMenu();
     }
 
-
-    // ============================================================
-    // Stop
-    // ============================================================
-
     private void Stop()
     {
+        _capsHelpTimer.Stop();
+
         _keyboardHook.Stop();
 
         UpdateMenu();
     }
 
-
     // ============================================================
-    // Language requested
+    // Language switching
     // ============================================================
 
     private LanguageAction OnLanguageRequested(
-    LanguageKey language)
+        LanguageKey language)
     {
+        if (_disposed)
+            return LanguageAction.SwitchLanguage;
+
         KeyboardLayout? current =
             _languageSwitcher.CurrentLayout;
 
-        KeyboardLayout? target =
-            language switch
-            {
-                LanguageKey.English =>
-                    _layouts.English,
+        KeyboardLayout? target = language switch
+        {
+            LanguageKey.English => _layouts.English,
+            LanguageKey.Russian => _layouts.Russian,
+            LanguageKey.Ukrainian => _layouts.Ukrainian,
+            _ => null
+        };
 
-                LanguageKey.Russian =>
-                    _layouts.Russian,
-
-                LanguageKey.Ukrainian =>
-                    _layouts.Ukrainian,
-
-                _ =>
-                    null
-            };
-
-        // Якщо цільова розкладка не знайдена —
-        // це має бути перемикання.
+        // Якщо цільової розкладки немає —
+        // команду все одно поглинаємо.
         if (target == null)
             return LanguageAction.SwitchLanguage;
 
-        // Якщо ми вже на потрібній мові,
-        // Caps+A/Z/Q працює як Shift+клавіша.
+        // Якщо потрібна мова вже активна —
+        // Caps+A/Z/Q працює як Shift+A/Z/Q.
         if (current != null &&
             current.Hkl == target.Hkl)
         {
             return LanguageAction.ShiftKey;
         }
 
-        // Інакше це команда перемикання мови.
-        bool success =
-            language switch
-            {
-                LanguageKey.English =>
-                    _languageSwitcher.SwitchToEnglish(),
+        // Перемикання виконуємо АСИНХРОННО,
+        // після завершення keyboard hook callback.
+        //
+        // Це необхідно, щоб A/Z/Q не потрапляли
+        // в активну програму вже після зміни розкладки.
+        try
+        {
+            _uiInvoker.BeginInvoke(
+                new Action(() =>
+                    SwitchLanguage(language)));
+        }
+        catch (InvalidOperationException)
+        {
+            // UI вже завершує роботу.
+        }
 
-                LanguageKey.Russian =>
-                    _languageSwitcher.SwitchToRussian(),
-
-                LanguageKey.Ukrainian =>
-                    _languageSwitcher.SwitchToUkrainian(),
-
-                _ =>
-                    false
-            };
-
-        _ = success;
-
+        // Саму командну клавішу A/Z/Q поглинаємо.
         return LanguageAction.SwitchLanguage;
     }
 
+    private void SwitchLanguage(
+        LanguageKey language)
+    {
+        if (_disposed)
+            return;
+
+        switch (language)
+        {
+            case LanguageKey.English:
+                _languageSwitcher.SwitchToEnglish();
+                break;
+
+            case LanguageKey.Russian:
+                _languageSwitcher.SwitchToRussian();
+                break;
+
+            case LanguageKey.Ukrainian:
+                _languageSwitcher.SwitchToUkrainian();
+                break;
+        }
+    }
 
     // ============================================================
-    // Tray menu state
+    // CapsLock Help
+    // ============================================================
+
+    private void OnCapsLockPressed()
+    {
+        if (_disposed)
+            return;
+
+        // Подія приходить з keyboard hook.
+        // Таймер повинен запускатися в UI-потоці.
+        try
+        {
+            _uiInvoker.BeginInvoke(
+                new Action(() =>
+                {
+                    if (_disposed)
+                        return;
+
+                    _capsHelpTimer.Stop();
+                    _capsHelpTimer.Start();
+                }));
+        }
+        catch (InvalidOperationException)
+        {
+            // UI вже завершує роботу.
+        }
+    }
+
+    private void OnCapsLockReleased()
+    {
+        if (_disposed)
+            return;
+
+        try
+        {
+            _uiInvoker.BeginInvoke(
+                new Action(() =>
+                {
+                    if (_disposed)
+                        return;
+
+                    _capsHelpTimer.Stop();
+                }));
+        }
+        catch (InvalidOperationException)
+        {
+            // UI вже завершує роботу.
+        }
+    }
+
+    private void OnCapsLockActivity()
+    {
+        if (_disposed)
+            return;
+
+        try
+        {
+            _uiInvoker.BeginInvoke(
+                new Action(() =>
+                {
+                    if (_disposed)
+                        return;
+
+                    _capsHelpTimer.Stop();
+                }));
+        }
+        catch (InvalidOperationException)
+        {
+            // UI вже завершує роботу.
+        }
+    }
+
+    private void OnCapsHelpTimerTick(
+        object? sender,
+        EventArgs e)
+    {
+        _capsHelpTimer.Stop();
+
+        if (_disposed)
+            return;
+
+        if (!_keyboardHook.IsRunning)
+            return;
+
+        // Якщо ми дійшли сюди — CapsLock утримувався
+        // приблизно 2 секунди без іншої клавіші.
+        ShowHelp();
+    }
+
+    // ============================================================
+    // Tray menu
     // ============================================================
 
     private void UpdateMenu()
@@ -300,74 +317,68 @@ public sealed class TrayApplication : IDisposable
         _startItem.Enabled =
             !_keyboardHook.IsRunning;
 
-
         _stopItem.Enabled =
             _keyboardHook.IsRunning;
     }
 
-
-    // ============================================================
-    // Help
-    // ============================================================
-
     private void ShowHelp()
     {
+        if (_disposed)
+            return;
+
         MessageBox.Show(
             "KeyboardSwitcher\r\n\r\n" +
-
             "CapsLock + A  →  English\r\n" +
             "CapsLock + Z  →  Russian\r\n" +
             "CapsLock + Q  →  Ukrainian\r\n\r\n" +
-
+            "CapsLock + інша клавіша → Shift + клавіша\r\n\r\n" +
             "CapsLock не працює як звичайний CapsLock.\r\n" +
             "Стандартні засоби Windows для перемикання " +
             "розкладки не блокуються.",
-
             "KeyboardSwitcher — Help",
-
             MessageBoxButtons.OK,
-
             MessageBoxIcon.Information);
     }
 
-
     // ============================================================
-    // Exit
+    // Exit / Dispose
     // ============================================================
 
     private void Exit()
     {
         Dispose();
-
         Application.Exit();
     }
-
-
-    // ============================================================
-    // Dispose
-    // ============================================================
 
     public void Dispose()
     {
         if (_disposed)
             return;
 
+        _disposed = true;
+
+        _capsHelpTimer.Stop();
 
         _keyboardHook.LanguageRequested -=
             OnLanguageRequested;
 
+        _keyboardHook.CapsLockPressed -=
+            OnCapsLockPressed;
+
+        _keyboardHook.CapsLockReleased -=
+            OnCapsLockReleased;
+
+        _keyboardHook.CapsLockActivity -=
+            OnCapsLockActivity;
 
         _keyboardHook.Dispose();
 
+        _capsHelpTimer.Dispose();
+
+        _uiInvoker.Dispose();
 
         _trayIcon.Visible = false;
-
-
         _trayIcon.Dispose();
-
-
-        _disposed = true;
-
 
         GC.SuppressFinalize(this);
     }
