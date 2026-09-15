@@ -61,6 +61,7 @@ public sealed class KeyboardHook : IDisposable
     private static readonly UIntPtr InjectionMarker =
         new UIntPtr(0x4B535748u);
 
+
     // Windows API
     [DllImport("user32.dll")]
     private static extern IntPtr SetWindowsHookEx(
@@ -94,6 +95,7 @@ public sealed class KeyboardHook : IDisposable
         uint nInputs,
         INPUT[] pInputs,
         int cbSize);
+
 
     // SendInput structures
 
@@ -145,30 +147,8 @@ public sealed class KeyboardHook : IDisposable
         public ushort wParamL;
         public ushort wParamH;
     }
-    /* [StructLayout(LayoutKind.Sequential)]
-     private struct INPUT
-     {
-         public uint type;
-         public InputUnion U;
-     }
 
-     [StructLayout(LayoutKind.Explicit)]
-     private struct InputUnion
-     {
-         [FieldOffset(0)]
-         public KEYBDINPUT ki;
-     }
 
-     [StructLayout(LayoutKind.Sequential)]
-     private struct KEYBDINPUT
-     {
-         public ushort wVk;
-         public ushort wScan;
-         public uint dwFlags;
-         public uint time;
-         public UIntPtr dwExtraInfo;
-     }
-     */
     // Hook structures
     private delegate IntPtr LowLevelKeyboardProc(
         int nCode,
@@ -185,11 +165,16 @@ public sealed class KeyboardHook : IDisposable
         public UIntPtr dwExtraInfo;
     }
 
+
     // State
     private IntPtr _hookId = IntPtr.Zero;
     private LowLevelKeyboardProc? _hookProc;
 
     private bool _capsModifierDown;
+
+    // Таймер підказки при утриманні чистого CapsLock.
+    private readonly System.Windows.Forms.Timer _capsHoldTimer;
+    private bool _capsHelpShown;
 
     private bool _leftShiftDown;
     private bool _rightShiftDown;
@@ -208,6 +193,8 @@ public sealed class KeyboardHook : IDisposable
     public bool IsRunning =>
         _hookId != IntPtr.Zero;
 
+    public bool IsCapsModifierDown =>
+        _capsModifierDown;
 
 
     // ------------------------------------------------------------
@@ -221,10 +208,31 @@ public sealed class KeyboardHook : IDisposable
     // ShiftKey       -> поводитися як Shift+Key
     public event Func<LanguageKey, LanguageAction>? LanguageRequested;
 
-    // Для майбутньої підказки CapsLock через 2.5 секунди.
+    // Показати підказку після тривалого утримання CapsLock.
+    public event Action? ShortcutHintRequested;
+
+    // CapsLock натиснутий / відпущений.
     public event Action? CapsLockPressed;
     public event Action? CapsLockReleased;
+
+    // Будь-яка клавіша після CapsLock.
     public event Action? CapsLockActivity;
+
+
+    // ------------------------------------------------------------
+    // Constructor
+    // ------------------------------------------------------------
+
+    public KeyboardHook()
+    {
+        _capsHoldTimer = new System.Windows.Forms.Timer
+        {
+            Interval = 1200
+        };
+
+        _capsHoldTimer.Tick += OnCapsHoldTimerTick;
+    }
+
 
     // ------------------------------------------------------------
     // Start
@@ -242,6 +250,8 @@ public sealed class KeyboardHook : IDisposable
         ForceCapsLockOff();
 
         _capsModifierDown = false;
+        _capsHelpShown = false;
+        _capsHoldTimer.Stop();
 
         _leftShiftDown = false;
         _rightShiftDown = false;
@@ -269,12 +279,16 @@ public sealed class KeyboardHook : IDisposable
         return true;
     }
 
+
     // ------------------------------------------------------------
     // Stop
     // ------------------------------------------------------------
 
     public void Stop()
     {
+        _capsHoldTimer.Stop();
+        _capsHelpShown = false;
+
         if (!IsRunning)
             return;
 
@@ -291,7 +305,7 @@ public sealed class KeyboardHook : IDisposable
                 1,
                 new[]
                 {
-            CreateShiftInput(true)
+                    CreateShiftInput(true)
                 },
                 Marshal.SizeOf<INPUT>());
 
@@ -299,6 +313,7 @@ public sealed class KeyboardHook : IDisposable
         }
 
         _capsModifierDown = false;
+        _capsHelpShown = false;
 
         _leftShiftDown = false;
         _rightShiftDown = false;
@@ -308,6 +323,7 @@ public sealed class KeyboardHook : IDisposable
 
         ForceCapsLockOff();
     }
+
 
     // ------------------------------------------------------------
     // Hook callback
@@ -374,9 +390,15 @@ public sealed class KeyboardHook : IDisposable
         {
             if (keyDown)
             {
-                _capsModifierDown = true;
+                if (!_capsModifierDown)
+                {
+                    _capsModifierDown = true;
+                    _capsHelpShown = false;
 
-                CapsLockPressed?.Invoke();
+                    _capsHoldTimer.Start();
+
+                    CapsLockPressed?.Invoke();
+                }
 
                 // CapsLock повністю поглинаємо.
                 return (IntPtr)1;
@@ -385,6 +407,9 @@ public sealed class KeyboardHook : IDisposable
             if (keyUp)
             {
                 _capsModifierDown = false;
+
+                _capsHoldTimer.Stop();
+                _capsHelpShown = false;
 
                 CapsLockReleased?.Invoke();
 
@@ -436,11 +461,13 @@ public sealed class KeyboardHook : IDisposable
 
         // --------------------------------------------------------
         // Будь-яка клавіша після Caps скасовує майбутню
-        // підказку 2.5 секунди.
+        // підказку.
         // --------------------------------------------------------
 
         if (keyDown)
         {
+            _capsHoldTimer.Stop();
+
             CapsLockActivity?.Invoke();
         }
 
@@ -452,7 +479,6 @@ public sealed class KeyboardHook : IDisposable
                 vk,
                 out LanguageKey language))
         {
-
             if (keyDown)
             {
                 // Якщо фізичний Shift уже натиснутий,
@@ -519,7 +545,7 @@ public sealed class KeyboardHook : IDisposable
 
         if (keyDown)
         {
-            // Якщо фізичний Shift вже натиснутий,
+            // Якщо фізичний Shift уже натиснутий,
             // другого Shift не додаємо.
             if (IsPhysicalShiftDown())
             {
@@ -543,6 +569,26 @@ public sealed class KeyboardHook : IDisposable
             wParam,
             lParam);
     }
+
+
+    // ------------------------------------------------------------
+    // CapsLock hold hint
+    // ------------------------------------------------------------
+
+    private void OnCapsHoldTimerTick(
+        object? sender,
+        EventArgs e)
+    {
+        _capsHoldTimer.Stop();
+
+        if (!_capsModifierDown || _capsHelpShown)
+            return;
+
+        _capsHelpShown = true;
+
+        ShortcutHintRequested?.Invoke();
+    }
+
 
     // ------------------------------------------------------------
     // Language key detection
@@ -571,6 +617,7 @@ public sealed class KeyboardHook : IDisposable
                 return false;
         }
     }
+
 
     // ------------------------------------------------------------
     // Physical Shift state
@@ -606,6 +653,7 @@ public sealed class KeyboardHook : IDisposable
                _rightShiftDown;
     }
 
+
     // ------------------------------------------------------------
     // Modifier detection
     // ------------------------------------------------------------
@@ -631,6 +679,7 @@ public sealed class KeyboardHook : IDisposable
                vk == VK_APPS;
     }
 
+
     // ------------------------------------------------------------
     // Caps-as-Shift
     // ------------------------------------------------------------
@@ -649,9 +698,10 @@ public sealed class KeyboardHook : IDisposable
         if (!_syntheticShiftDown)
         {
             INPUT[] inputs =
-                {
-                  CreateShiftInput(false),  CreateKeyInput( vk, false)
-                };
+            {
+                CreateShiftInput(false),
+                CreateKeyInput(vk, false)
+            };
 
             uint sent =
                 SendInput(
@@ -679,6 +729,7 @@ public sealed class KeyboardHook : IDisposable
         return true;
     }
 
+
     private bool SendShiftedKeyUp(
         int vk)
     {
@@ -690,24 +741,14 @@ public sealed class KeyboardHook : IDisposable
 
         if (lastKey)
         {
-            //INPUT[] inputs =
-            //{
-            //    CreateKeyInput(
-            //        vk,
-            //        true),
-
-            //    CreateKeyInput(
-            //        VK_LSHIFT,
-            //        true)
-            //};
-
             INPUT[] inputs =
-                    {
-                       CreateKeyInput(
-                       vk,
-                       true),
-                        CreateShiftInput(true)
-                    };
+            {
+                CreateKeyInput(
+                    vk,
+                    true),
+
+                CreateShiftInput(true)
+            };
 
             uint sent =
                 SendInput(
@@ -734,6 +775,7 @@ public sealed class KeyboardHook : IDisposable
 
         return true;
     }
+
 
     // ------------------------------------------------------------
     // SendInput helpers
@@ -792,7 +834,7 @@ public sealed class KeyboardHook : IDisposable
 
 
     private static INPUT CreateShiftInput(
-    bool keyUp)
+        bool keyUp)
     {
         return new INPUT
         {
@@ -803,6 +845,7 @@ public sealed class KeyboardHook : IDisposable
                 ki = new KEYBDINPUT
                 {
                     wVk = 0,
+
                     wScan = SCAN_LSHIFT,
 
                     dwFlags =
@@ -812,11 +855,14 @@ public sealed class KeyboardHook : IDisposable
                             : 0),
 
                     time = 0,
-                    dwExtraInfo = InjectionMarker
+
+                    dwExtraInfo =
+                        InjectionMarker
                 }
             }
         };
     }
+
 
     // ------------------------------------------------------------
     // Force CapsLock OFF
@@ -847,6 +893,7 @@ public sealed class KeyboardHook : IDisposable
             Marshal.SizeOf<INPUT>());
     }
 
+
     // ------------------------------------------------------------
     // Dispose
     // ------------------------------------------------------------
@@ -857,6 +904,8 @@ public sealed class KeyboardHook : IDisposable
             return;
 
         Stop();
+
+        _capsHoldTimer.Dispose();
 
         _disposed = true;
 
