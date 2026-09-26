@@ -7,20 +7,21 @@ public sealed class TrayApplication : IDisposable
 {
     private readonly KeyboardLayouts _layouts;
     private readonly LanguageSwitcher _languageSwitcher;
-    private readonly KeyboardHook _keyboardHook;
+
+    private KeyboardHook? _keyboardHook;
+
+    private readonly TextInputTracker _tracker;
+    private readonly TextInputCollector _collector;
+    private readonly KeyboardLayoutContext _layoutContext;
+    private readonly CommandProcessor _commandProcessor;
+    private readonly CommandDetector _commandDetector;
+
     private readonly NotifyIcon _trayIcon;
     private readonly ToolStripMenuItem _startItem;
     private readonly ToolStripMenuItem _stopItem;
 
-    // Невидимий Control у UI-потоці.
-    // Використовується для BeginInvoke().
-    private readonly Control _uiInvoker;
-
-    // Вікно підказки при тривалому утриманні CapsLock.
-    private ShortcutHintForm? _shortcutHint;
 
     private bool _disposed;
-
 
     public TrayApplication()
     {
@@ -45,33 +46,33 @@ public sealed class TrayApplication : IDisposable
         _languageSwitcher =
             new LanguageSwitcher(_layouts);
 
-        _keyboardHook =
-            new KeyboardHook();
+        _tracker =
+            new TextInputTracker();
 
+        _layoutContext =
+            new KeyboardLayoutContext();
 
-        // --------------------------------------------------------
-        // UI invoker
-        // --------------------------------------------------------
+        _collector =
+            new TextInputCollector(
+                _tracker,
+                _layoutContext);
 
-        _uiInvoker =
-            new Control();
+        _commandDetector =
+            new CommandDetector();
 
-        _uiInvoker.CreateControl();
+        _commandDetector.CommandDetected +=
+            OnCommandDetected;
 
+        _commandDetector.KeyPassed +=
+            _collector.Process;
 
-        // --------------------------------------------------------
-        // KeyboardHook events
-        // --------------------------------------------------------
+        _commandProcessor =
+            new CommandProcessor(
+                _tracker,
+                _languageSwitcher);
 
-        _keyboardHook.LanguageRequested +=
-            OnLanguageRequested;
-
-        _keyboardHook.ShortcutHintRequested +=
-            ShowShortcutHint;
-
-        _keyboardHook.CapsLockReleased +=
-            HideShortcutHint;
-
+        _commandDetector.CommandDetected +=
+            _commandProcessor.Process;
 
         // --------------------------------------------------------
         // Tray icon
@@ -99,7 +100,6 @@ public sealed class TrayApplication : IDisposable
         var exitItem =
             new ToolStripMenuItem("Exit");
 
-
         menu.Items.Add(_startItem);
         menu.Items.Add(_stopItem);
 
@@ -112,7 +112,6 @@ public sealed class TrayApplication : IDisposable
             new ToolStripSeparator());
 
         menu.Items.Add(exitItem);
-
 
         _trayIcon.ContextMenuStrip =
             menu;
@@ -132,7 +131,6 @@ public sealed class TrayApplication : IDisposable
         _trayIcon.DoubleClick +=
             (_, _) => ShowHelp();
 
-
         UpdateMenu();
 
         Start();
@@ -145,13 +143,34 @@ public sealed class TrayApplication : IDisposable
 
     private void Start()
     {
-        if (_keyboardHook.IsRunning)
+        if (_disposed)
             return;
 
-        if (!_keyboardHook.Start())
+        if (_keyboardHook != null)
+            return;
+
+        try
         {
+            _keyboardHook =
+                new KeyboardHook();
+
+            _keyboardHook.KeyPressed +=
+                _commandDetector.Process;
+
+            DebugLog.Write(
+                "KeyboardHook started.");
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Write(
+                $"KeyboardHook start failed: {ex}");
+
+            _keyboardHook?.Dispose();
+            _keyboardHook = null;
+
             MessageBox.Show(
-                "Не вдалося встановити keyboard hook.",
+                "Не вдалося встановити keyboard hook.\r\n\r\n" +
+                ex.Message,
                 "KeyboardSwitcher",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
@@ -165,132 +184,34 @@ public sealed class TrayApplication : IDisposable
 
     private void Stop()
     {
-        HideShortcutHint();
+        if (_keyboardHook == null)
+            return;
 
-        _keyboardHook.Stop();
+        _keyboardHook.KeyPressed -=
+            _commandDetector.Process;
+
+        _keyboardHook.Dispose();
+
+        _keyboardHook = null;
+
+        DebugLog.Write(
+            "KeyboardHook stopped.");
 
         UpdateMenu();
     }
 
 
     // ============================================================
-    // Language switching
+    // CommandDetector
     // ============================================================
 
-    private LanguageAction OnLanguageRequested(
-        LanguageKey language)
+    private void OnCommandDetected(
+        CommandEvent commandEvent)
     {
-        if (_disposed)
-            return LanguageAction.SwitchLanguage;
-
-        KeyboardLayout? current =
-            _languageSwitcher.CurrentLayout;
-
-        KeyboardLayout? target =
-            language switch
-            {
-                LanguageKey.English =>
-                    _layouts.English,
-
-                LanguageKey.Russian =>
-                    _layouts.Russian,
-
-                LanguageKey.Ukrainian =>
-                    _layouts.Ukrainian,
-
-                _ => null
-            };
-
-
-        // Якщо цільової розкладки немає —
-        // команду все одно поглинаємо.
-        if (target == null)
-            return LanguageAction.SwitchLanguage;
-
-
-        // Якщо потрібна мова вже активна —
-        // Caps+A/Z/Q працює як Shift+A/Z/Q.
-        if (current != null &&
-            current.Hkl == target.Hkl)
-        {
-            return LanguageAction.ShiftKey;
-        }
-
-
-        // Перемикання виконуємо АСИНХРОННО,
-        // після завершення keyboard hook callback.
-        //
-        // Це необхідно, щоб A/Z/Q не потрапляли
-        // в активну програму вже після зміни розкладки.
-        try
-        {
-            _uiInvoker.BeginInvoke(
-                new Action(() =>
-                    SwitchLanguage(language)));
-        }
-        catch (InvalidOperationException)
-        {
-            // UI вже завершує роботу.
-        }
-
-
-        // Саму командну клавішу A/Z/Q поглинаємо.
-        return LanguageAction.SwitchLanguage;
-    }
-
-
-    private void SwitchLanguage(
-        LanguageKey language)
-    {
-        if (_disposed)
-            return;
-
-        switch (language)
-        {
-            case LanguageKey.English:
-                _languageSwitcher.SwitchToEnglish();
-                break;
-
-            case LanguageKey.Russian:
-                _languageSwitcher.SwitchToRussian();
-                break;
-
-            case LanguageKey.Ukrainian:
-                _languageSwitcher.SwitchToUkrainian();
-                break;
-        }
-    }
-
-
-    // ============================================================
-    // CapsLock hint
-    // ============================================================
-
-    private void ShowShortcutHint()
-    {
-        if (_disposed)
-            return;
-
-        if (_shortcutHint == null ||
-            _shortcutHint.IsDisposed)
-        {
-            _shortcutHint =
-                new ShortcutHintForm();
-        }
-
-        _shortcutHint.ShowNearBottomRight();
-    }
-
-
-    private void HideShortcutHint()
-    {
-        if (_shortcutHint == null ||
-            _shortcutHint.IsDisposed)
-        {
-            return;
-        }
-
-        _shortcutHint.Hide();
+        DebugLog.Write(
+            $"COMMAND: " +
+            $"Command={commandEvent.Command} " +
+            $"Action={commandEvent.Action}");
     }
 
 
@@ -300,11 +221,14 @@ public sealed class TrayApplication : IDisposable
 
     private void UpdateMenu()
     {
+        bool running =
+            _keyboardHook != null;
+
         _startItem.Enabled =
-            !_keyboardHook.IsRunning;
+            !running;
 
         _stopItem.Enabled =
-            _keyboardHook.IsRunning;
+            running;
     }
 
 
@@ -318,10 +242,8 @@ public sealed class TrayApplication : IDisposable
             "CapsLock + A  →  English\r\n" +
             "CapsLock + Z  →  Russian\r\n" +
             "CapsLock + Q  →  Ukrainian\r\n\r\n" +
-            "CapsLock + інша клавіша → Shift + клавіша\r\n\r\n" +
-            "CapsLock не працює як звичайний CapsLock.\r\n" +
-            "Стандартні засоби Windows для перемикання " +
-            "розкладки не блокуються.",
+            "Поточна версія використовує новий\r\n" +
+            "CommandDetector / TextInputCollector.",
             "KeyboardSwitcher — Help",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
@@ -335,6 +257,7 @@ public sealed class TrayApplication : IDisposable
     private void Exit()
     {
         Dispose();
+
         Application.Exit();
     }
 
@@ -346,22 +269,16 @@ public sealed class TrayApplication : IDisposable
 
         _disposed = true;
 
-        HideShortcutHint();
+        _commandDetector.CommandDetected -=
+            OnCommandDetected;
 
-        _keyboardHook.LanguageRequested -=
-            OnLanguageRequested;
+        _commandDetector.KeyPassed -=
+            _collector.Process;
 
-        _keyboardHook.ShortcutHintRequested -=
-            ShowShortcutHint;
+        _commandDetector.CommandDetected -=
+            _commandProcessor.Process;
 
-        _keyboardHook.CapsLockReleased -=
-            HideShortcutHint;
-
-        _keyboardHook.Dispose();
-
-        _shortcutHint?.Dispose();
-
-        _uiInvoker.Dispose();
+        Stop();
 
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
