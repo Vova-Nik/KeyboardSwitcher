@@ -66,10 +66,24 @@ public sealed class TrayApplication : IDisposable
         _commandDetector.KeyPassed +=
             _collector.Process;
 
+        //_commandProcessor =
+        //    new CommandProcessor(
+        //        _tracker,
+        //        _languageSwitcher);
+
+        var keyboardLayoutConverter =
+            new KeyboardLayoutConverter();
+
+        var textLayoutConverter =
+            new TextLayoutConverter(
+                keyboardLayoutConverter);
+
         _commandProcessor =
             new CommandProcessor(
                 _tracker,
-                _languageSwitcher);
+                _languageSwitcher,
+                keyboardLayoutConverter,
+                textLayoutConverter);
 
         _commandDetector.CommandDetected +=
             _commandProcessor.Process;
@@ -159,6 +173,10 @@ public sealed class TrayApplication : IDisposable
 
             DebugLog.Write(
                 "KeyboardHook started.");
+
+            //MessageBox.Show(
+            //    "TrayApplication: KeyboardHook started",
+            //     "TEST");
         }
         catch (Exception ex)
         {

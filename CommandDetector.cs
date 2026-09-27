@@ -32,12 +32,10 @@ public sealed class CommandDetector
 
     public event Action<KeyInfo>? KeyPassed;
 
-    //public void Process(KeyInfo info)
+    //public bool Process(KeyInfo info)
     //{
-    //    // Синтетичний ввід конвертера
-    //    // не повинен проходити через командний детектор.
     //    if (info.IsConverterInput)
-    //        return;
+    //        return false;
 
     //    LayoutCommand command =
     //        GetCommand(info);
@@ -45,29 +43,35 @@ public sealed class CommandDetector
     //    if (command == LayoutCommand.None)
     //    {
     //        KeyPassed?.Invoke(info);
-    //        return;
+    //        return false;
     //    }
 
     //    long now =
     //        Stopwatch.GetTimestamp();
 
     //    CommandAction action =
-    //        DetectAction(
-    //            command,
-    //            now);
+    //        DetectAction(command, now);
 
-    //    if (action == CommandAction.None)
-    //        return;
+    //    if (action != CommandAction.None)
+    //    {
+    //        CommandDetected?.Invoke(
+    //            new CommandEvent(command, action));
+    //    }
 
-    //    CommandDetected?.Invoke(
-    //        new CommandEvent(
-    //            command,
-    //            action));
+    //    // Це командна клавіша Caps+A/Z/Q.
+    //    // Не передаємо її далі в Windows.
+    //    return true;
     //}
+
     public bool Process(KeyInfo info)
     {
         if (info.IsConverterInput)
             return false;
+
+        // CapsLock працює тільки як модифікатор.
+        // Не передаємо його в Windows.
+        if (info.Key == Keys.Capital)
+            return true;
 
         LayoutCommand command =
             GetCommand(info);
@@ -90,8 +94,8 @@ public sealed class CommandDetector
                 new CommandEvent(command, action));
         }
 
-        // Це командна клавіша Caps+A/Z/Q.
-        // Не передаємо її далі в Windows.
+        // Caps+A / Caps+Z / Caps+Q
+        // завжди поглинаємо.
         return true;
     }
 

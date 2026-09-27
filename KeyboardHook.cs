@@ -122,35 +122,6 @@ public sealed class KeyboardHook : IDisposable
                 "Не вдалося встановити keyboard hook.");
         }
     }
-
-    //private IntPtr HookCallback(
-    //    int nCode,
-    //    IntPtr wParam,
-    //    IntPtr lParam)
-    //{
-    //    if (nCode >= 0)
-    //    {
-    //        int message =
-    //            wParam.ToInt32();
-
-    //        if (message == WM_KEYDOWN ||
-    //            message == WM_SYSKEYDOWN)
-    //        {
-    //            HandleKeyDown(lParam);
-    //        }
-    //        else if (message == WM_KEYUP ||
-    //                 message == WM_SYSKEYUP)
-    //        {
-    //            HandleKeyUp(lParam);
-    //        }
-    //    }
-
-    //    return CallNextHookEx(
-    //        _hookHandle,
-    //        nCode,
-    //        lParam,
-    //        lParam);
-    //}
     private IntPtr HookCallback(
     int nCode,
     IntPtr wParam,
@@ -170,10 +141,23 @@ public sealed class KeyboardHook : IDisposable
                 if (handled)
                     return (IntPtr)1;
             }
+            //else if (message == WM_KEYUP ||
+            //         message == WM_SYSKEYUP)
+            //{
+            //    HandleKeyUp(lParam);
+            //}
+
             else if (message == WM_KEYUP ||
                      message == WM_SYSKEYUP)
             {
                 HandleKeyUp(lParam);
+
+                KBDLLHOOKSTRUCT data =
+                    Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(
+                        lParam);
+
+                if (data.vkCode == VK_CAPITAL)
+                    return (IntPtr)1;
             }
         }
 
@@ -184,50 +168,6 @@ public sealed class KeyboardHook : IDisposable
             lParam);
     }
 
-    //private void  HandleKeyDown(
-    //    IntPtr lParam)
-    //{
-    //    KBDLLHOOKSTRUCT data =
-    //        Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(
-    //            lParam);
-
-    //    bool isCapsLock =
-    //        data.vkCode == VK_CAPITAL;
-
-    //    if (isCapsLock)
-    //    {
-    //        _capsLockHeld = true;
-    //    }
-
-    //    bool extended =
-    //        (data.flags & LLKHF_EXTENDED) != 0;
-
-    //    bool shift =
-    //        IsKeyDown(VK_SHIFT);
-
-    //    bool ctrl =
-    //        IsKeyDown(VK_CONTROL);
-
-    //    bool alt =
-    //        IsKeyDown(VK_MENU);
-
-    //    bool isConverterInput =
-    //        (data.flags & LLKHF_INJECTED) != 0 &&
-    //        data.dwExtraInfo == ConverterMarker;
-
-    //    var info = new KeyInfo(
-    //        (Keys)data.vkCode,
-    //        data.vkCode,
-    //        data.scanCode,
-    //        extended,
-    //        shift,
-    //        ctrl,
-    //        alt,
-    //        _capsLockHeld,
-    //        isConverterInput);
-
-    //    KeyPressed?.Invoke(info);
-    //}
 
     private bool HandleKeyDown(
     IntPtr lParam)
@@ -271,7 +211,20 @@ public sealed class KeyboardHook : IDisposable
             _capsLockHeld,
             isConverterInput);
 
-        return KeyPressed?.Invoke(info) ?? false;
+        bool handled =
+            KeyPressed?.Invoke(info) ?? false;
+
+        DebugLog.Write(
+            $"HOOK: KeyDown " +
+            $"Key={info.Key} " +
+            $"VK=0x{info.VirtualKey:X} " +
+            $"SC=0x{info.ScanCode:X} " +
+            $"CapsHeld={info.CapsLockHeld} " +
+            $"Handled={handled}");
+
+        return handled;
+
+        //return KeyPressed?.Invoke(info) ?? false;
     }
 
     private void HandleKeyUp(
