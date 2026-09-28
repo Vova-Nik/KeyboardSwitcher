@@ -163,6 +163,41 @@ public sealed class CommandProcessor
 
         DebugLog.Write(
             $"PROCESSOR: CONVERSION RESULT = \"{result}\"");
+
+        var textReplacer =
+            new TextReplacer();
+
+        int count =
+            _tracker.PendingBuffer.Count;
+
+        bool deleted =
+            textReplacer.DeleteCharacters(count);
+
+        DebugLog.Write(
+            $"PROCESSOR: DELETE RESULT = {deleted}");
+
+        if (!deleted)
+        {
+            DebugLog.Write(
+                "PROCESSOR: INSERT skipped because DELETE failed.");
+
+            return;
+        }
+
+        bool inserted =
+            textReplacer.InsertText(result);
+
+        DebugLog.Write(
+            $"PROCESSOR: INSERT RESULT = {inserted}");
+
+        if (inserted)
+        {
+            _tracker.ClearPending();
+
+            DebugLog.Write(
+                "PROCESSOR: PendingBuffer cleared.");
+        }
+
     }
 
     private static TestKeyboardLayout? GetTargetLayout(

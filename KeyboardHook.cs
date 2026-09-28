@@ -93,8 +93,8 @@ public sealed class KeyboardHook : IDisposable
     private static extern short GetAsyncKeyState(
         int vKey);
 
-    private static readonly UIntPtr ConverterMarker =
-        new UIntPtr(0x4B53434F4E564552UL);
+    //private static readonly UIntPtr ConverterMarker =
+    //    new UIntPtr(0x4B53434F4E564552UL);
 
     private readonly LowLevelKeyboardProc _proc;
 
@@ -198,7 +198,7 @@ public sealed class KeyboardHook : IDisposable
 
         bool isConverterInput =
             (data.flags & LLKHF_INJECTED) != 0 &&
-            data.dwExtraInfo == ConverterMarker;
+            data.dwExtraInfo == InputInjection.ConverterMarker;
 
         var info = new KeyInfo(
             (Keys)data.vkCode,
@@ -214,12 +214,21 @@ public sealed class KeyboardHook : IDisposable
         bool handled =
             KeyPressed?.Invoke(info) ?? false;
 
+        //DebugLog.Write(
+        //    $"HOOK: KeyDown " +
+        //    $"Key={info.Key} " +
+        //    $"VK=0x{info.VirtualKey:X} " +
+        //    $"SC=0x{info.ScanCode:X} " +
+        //    $"CapsHeld={info.CapsLockHeld} " +
+        //    $"Handled={handled}");
+
         DebugLog.Write(
             $"HOOK: KeyDown " +
             $"Key={info.Key} " +
             $"VK=0x{info.VirtualKey:X} " +
             $"SC=0x{info.ScanCode:X} " +
             $"CapsHeld={info.CapsLockHeld} " +
+            $"Converter={info.IsConverterInput} " +
             $"Handled={handled}");
 
         return handled;
@@ -251,7 +260,9 @@ public sealed class KeyboardHook : IDisposable
 
         bool isConverterInput =
             (data.flags & LLKHF_INJECTED) != 0 &&
-            data.dwExtraInfo == ConverterMarker;
+            //data.dwExtraInfo == ConverterMarker;
+            data.dwExtraInfo == InputInjection.ConverterMarker;
+
 
         var info = new KeyInfo(
             (Keys)data.vkCode,

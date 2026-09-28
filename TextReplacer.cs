@@ -11,20 +11,36 @@ public sealed class TextReplacer
 
     private const ushort VK_BACK = 0x08;
 
-    private const ulong ConverterMarkerValue =
-        0x4B53434F4E564552UL;
+    private const uint KEYEVENTF_UNICODE = 0x0004;
 
-    [StructLayout(LayoutKind.Sequential)]
+    //private const ulong ConverterMarkerValue =
+    //    0x4B53434F4E564552UL;
+
+
+    //[StructLayout(LayoutKind.Sequential)]
+    //private struct INPUT
+    //{
+    //    public uint type;
+    //    public KEYBDINPUT ki;
+    //}
+
+    //[StructLayout(LayoutKind.Sequential)]
+    //private struct KEYBDINPUT
+    //{
+    //    public ushort wVk;
+    //    public ushort wScan;
+    //    public uint dwFlags;
+    //    public uint time;
+    //    public UIntPtr dwExtraInfo;
+    //}
+
+    [StructLayout(LayoutKind.Explicit, Size = 40)]
     private struct INPUT
     {
-        public uint type;
-        public InputUnion U;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    private struct InputUnion
-    {
         [FieldOffset(0)]
+        public uint type;
+
+        [FieldOffset(8)]
         public KEYBDINPUT ki;
     }
 
@@ -61,42 +77,169 @@ public sealed class TextReplacer
                 CreateBackspace(true);
         }
 
+        //uint sent =
+        //    SendInput(
+        //        (uint)inputs.Length,
+        //        inputs,
+        //        Marshal.SizeOf<INPUT>());
+
+        //DebugLog.Write(
+        //    $"TEXTREPLACER: DeleteCharacters " +
+        //    $"Count={count} " +
+        //    $"Sent={sent}/{inputs.Length}");
+
+        DebugLog.Write(
+            $"TEXTREPLACER: INPUT size=" +
+            $"{Marshal.SizeOf<INPUT>()} " +
+            $"KEYBDINPUT size=" +
+            $"{Marshal.SizeOf<KEYBDINPUT>()}");
+
         uint sent =
             SendInput(
                 (uint)inputs.Length,
                 inputs,
                 Marshal.SizeOf<INPUT>());
 
+        int error =
+            sent == inputs.Length
+                ? 0
+                : Marshal.GetLastWin32Error();
+
         DebugLog.Write(
             $"TEXTREPLACER: DeleteCharacters " +
             $"Count={count} " +
-            $"Sent={sent}/{inputs.Length}");
+            $"Sent={sent}/{inputs.Length} " +
+            $"Error={error}");
 
         return sent == inputs.Length;
     }
 
+    //private static INPUT CreateBackspace(
+    //    bool keyUp)
+    //{
+    //    return new INPUT
+    //    {
+    //        type = INPUT_KEYBOARD,
+    //        U = new InputUnion
+    //        {
+    //            ki = new KEYBDINPUT
+    //            {
+    //                wVk = VK_BACK,
+    //                wScan = 0,
+    //                dwFlags =
+    //                    keyUp
+    //                        ? KEYEVENTF_KEYUP
+    //                        : 0,
+    //                time = 0,
+    //                dwExtraInfo =
+    //                    new UIntPtr(
+    //                        ConverterMarkerValue)
+    //            }
+    //        }
+    //    };
+    //}
     private static INPUT CreateBackspace(
         bool keyUp)
     {
         return new INPUT
         {
             type = INPUT_KEYBOARD,
-            U = new InputUnion
+            ki = new KEYBDINPUT
             {
-                ki = new KEYBDINPUT
-                {
-                    wVk = VK_BACK,
-                    wScan = 0,
-                    dwFlags =
-                        keyUp
-                            ? KEYEVENTF_KEYUP
-                            : 0,
-                    time = 0,
-                    dwExtraInfo =
-                        new UIntPtr(
-                            ConverterMarkerValue)
-                }
+                wVk = VK_BACK,
+                wScan = 0,
+                dwFlags =
+                    keyUp
+                        ? KEYEVENTF_KEYUP
+                        : 0,
+                time = 0,
+                //dwExtraInfo =
+                //    new UIntPtr(
+                //        ConverterMarkerValue)
+                dwExtraInfo =
+                          InputInjection.ConverterMarker
+
             }
         };
     }
+
+    public bool InsertText(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return true;
+
+        var inputs =
+            new List<INPUT>();
+
+        foreach (char character in text)
+        {
+            AddUnicodeCharacter(
+                inputs,
+                character);
+        }
+
+        if (inputs.Count == 0)
+            return true;
+
+        INPUT[] inputArray =
+            inputs.ToArray();
+
+        uint sent =
+            SendInput(
+                (uint)inputArray.Length,
+                inputArray,
+                Marshal.SizeOf<INPUT>());
+
+        int error =
+            sent == inputArray.Length
+                ? 0
+                : Marshal.GetLastWin32Error();
+
+        DebugLog.Write(
+            $"TEXTREPLACER: InsertText " +
+            $"Text=\"{text}\" " +
+            $"Inputs={inputArray.Length} " +
+            $"Sent={sent} " +
+            $"Error={error}");
+
+        return sent == inputArray.Length;
+    }
+
+    private static void AddUnicodeCharacter(
+        List<INPUT> inputs,
+        char character)
+    {
+        inputs.Add(
+            new INPUT
+            {
+                type = INPUT_KEYBOARD,
+                ki = new KEYBDINPUT
+                {
+                    wVk = 0,
+                    wScan = character,
+                    dwFlags = KEYEVENTF_UNICODE,
+                    time = 0,
+                    dwExtraInfo =
+                        InputInjection.ConverterMarker
+                }
+            });
+
+        inputs.Add(
+            new INPUT
+            {
+                type = INPUT_KEYBOARD,
+                ki = new KEYBDINPUT
+                {
+                    wVk = 0,
+                    wScan = character,
+                    dwFlags =
+                        KEYEVENTF_UNICODE |
+                        KEYEVENTF_KEYUP,
+                    time = 0,
+                    dwExtraInfo =
+                        InputInjection.ConverterMarker
+                }
+            });
+    }
+
 }
