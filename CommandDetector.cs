@@ -14,62 +14,36 @@ public enum LayoutCommand
 public enum CommandAction
 {
     None,
-    First,
-    Second
+    Single,
+    Double
 }
 
 public sealed class CommandDetector
 {
-    private const long SecondPressLimitMs = 300;
-    private const long NewCommandLimitMs = 500;
+    private const long DoublePressLimitMs = 300;
 
-    private LayoutCommand _lastCommand =
+    private readonly object _lock = new();
+
+    // Попередня повна команда Caps+X.
+    private LayoutCommand _pendingCommand =
         LayoutCommand.None;
 
-    private long _lastCommandTime;
+    // Час завершення першої команди — тобто момент A/Z/Q.
+    private long _pendingCommandTime;
+
+    private System.Threading.Timer? _timer;
 
     public event Action<CommandEvent>? CommandDetected;
 
     public event Action<KeyInfo>? KeyPassed;
-
-    //public bool Process(KeyInfo info)
-    //{
-    //    if (info.IsConverterInput)
-    //        return false;
-
-    //    LayoutCommand command =
-    //        GetCommand(info);
-
-    //    if (command == LayoutCommand.None)
-    //    {
-    //        KeyPassed?.Invoke(info);
-    //        return false;
-    //    }
-
-    //    long now =
-    //        Stopwatch.GetTimestamp();
-
-    //    CommandAction action =
-    //        DetectAction(command, now);
-
-    //    if (action != CommandAction.None)
-    //    {
-    //        CommandDetected?.Invoke(
-    //            new CommandEvent(command, action));
-    //    }
-
-    //    // Це командна клавіша Caps+A/Z/Q.
-    //    // Не передаємо її далі в Windows.
-    //    return true;
-    //}
 
     public bool Process(KeyInfo info)
     {
         if (info.IsConverterInput)
             return false;
 
-        // CapsLock працює тільки як модифікатор.
-        // Не передаємо його в Windows.
+        // Сам CapsLock — тільки модифікатор.
+        // До CommandDetector окремо він не передається.
         if (info.Key == Keys.Capital)
             return true;
 
@@ -82,29 +56,178 @@ public sealed class CommandDetector
             return false;
         }
 
-        long now =
-            Stopwatch.GetTimestamp();
-
-        CommandAction action =
-            DetectAction(command, now);
-
-        if (action != CommandAction.None)
+        lock (_lock)
         {
-            CommandDetected?.Invoke(
-                new CommandEvent(command, action));
-        }
+            long now =
+                Stopwatch.GetTimestamp();
 
-        // Caps+A / Caps+Z / Caps+Q
-        // завжди поглинаємо.
-        return true;
+            // Немає попередньої Caps+X.
+            if (_pendingCommand == LayoutCommand.None)
+            {
+                StartPendingCommand(
+                    command,
+                    now);
+
+                DebugLog.Write(
+                    $"COMMAND: First command. " +
+                    $"Command={command}. " +
+                    $"Starting 300ms double window.");
+
+                return true;
+            }
+
+            long elapsedMs =
+                (now - _pendingCommandTime) *
+                1000 /
+                Stopwatch.Frequency;
+
+            // Та сама команда в межах 300 мс:
+            // Caps+A + Caps+A = Double.
+            if (command == _pendingCommand &&
+                elapsedMs <= DoublePressLimitMs)
+            {
+                CancelTimer();
+
+                LayoutCommand doubleCommand =
+                    _pendingCommand;
+
+                _pendingCommand =
+                    LayoutCommand.None;
+
+                _pendingCommandTime = 0;
+
+                DebugLog.Write(
+                    $"COMMAND: Command={doubleCommand} " +
+                    $"Action=Double " +
+                    $"Elapsed={elapsedMs}ms");
+
+                CommandDetected?.Invoke(
+                    new CommandEvent(
+                        doubleCommand,
+                        CommandAction.Double));
+
+                return true;
+            }
+
+            // Була інша команда або минуло більше 300 мс.
+            //
+            // Попередня команда тепер однозначно Single.
+            LayoutCommand previousCommand =
+                _pendingCommand;
+
+            CancelTimer();
+
+            _pendingCommand =
+                LayoutCommand.None;
+
+            _pendingCommandTime = 0;
+
+            DebugLog.Write(
+                $"COMMAND: Command={previousCommand} " +
+                $"Action=Single " +
+                $"Elapsed={elapsedMs}ms");
+
+            CommandDetected?.Invoke(
+                new CommandEvent(
+                    previousCommand,
+                    CommandAction.Single));
+
+            // Поточна команда стає першою
+            // для наступного можливого Double.
+            StartPendingCommand(
+                command,
+                now);
+
+            DebugLog.Write(
+                $"COMMAND: First command. " +
+                $"Command={command}. " +
+                $"Starting 300ms double window.");
+
+            return true;
+        }
     }
 
     public void Reset()
     {
-        _lastCommand =
-            LayoutCommand.None;
+        lock (_lock)
+        {
+            CancelTimer();
 
-        _lastCommandTime = 0;
+            _pendingCommand =
+                LayoutCommand.None;
+
+            _pendingCommandTime = 0;
+        }
+    }
+
+    private void StartPendingCommand(
+        LayoutCommand command,
+        long timestamp)
+    {
+        _pendingCommand =
+            command;
+
+        _pendingCommandTime =
+            timestamp;
+
+        _timer =
+            new System.Threading.Timer(
+                _ =>
+                {
+                    CompleteSingleCommand();
+                },
+                null,
+                DoublePressLimitMs,
+                Timeout.Infinite);
+    }
+
+    private void CompleteSingleCommand()
+    {
+        lock (_lock)
+        {
+            if (_pendingCommand == LayoutCommand.None)
+                return;
+
+            long now =
+                Stopwatch.GetTimestamp();
+
+            long elapsedMs =
+                (now - _pendingCommandTime) *
+                1000 /
+                Stopwatch.Frequency;
+
+            // Захист від можливого раннього
+            // спрацювання Timer.
+            if (elapsedMs < DoublePressLimitMs)
+                return;
+
+            LayoutCommand command =
+                _pendingCommand;
+
+            _pendingCommand =
+                LayoutCommand.None;
+
+            _pendingCommandTime = 0;
+
+            _timer?.Dispose();
+            _timer = null;
+
+            DebugLog.Write(
+                $"COMMAND: Command={command} " +
+                $"Action=Single " +
+                $"Elapsed={elapsedMs}ms");
+
+            CommandDetected?.Invoke(
+                new CommandEvent(
+                    command,
+                    CommandAction.Single));
+        }
+    }
+
+    private void CancelTimer()
+    {
+        _timer?.Dispose();
+        _timer = null;
     }
 
     private static LayoutCommand GetCommand(
@@ -120,54 +243,5 @@ public sealed class CommandDetector
             Keys.Z => LayoutCommand.Russian,
             _ => LayoutCommand.None
         };
-    }
-
-    private CommandAction DetectAction(
-        LayoutCommand command,
-        long now)
-    {
-        if (_lastCommand == LayoutCommand.None)
-        {
-            StartNewCommand(
-                command,
-                now);
-
-            return CommandAction.First;
-        }
-
-        long elapsedMs =
-            (now - _lastCommandTime) * 1000 /
-            Stopwatch.Frequency;
-
-        if (command == _lastCommand &&
-            elapsedMs <= SecondPressLimitMs)
-        {
-            _lastCommand =
-                LayoutCommand.None;
-
-            _lastCommandTime = 0;
-
-            return CommandAction.Second;
-        }
-
-        if (command == _lastCommand &&
-            elapsedMs <= NewCommandLimitMs)
-        {
-            return CommandAction.None;
-        }
-
-        StartNewCommand(
-            command,
-            now);
-
-        return CommandAction.First;
-    }
-
-    private void StartNewCommand(
-        LayoutCommand command,
-        long time)
-    {
-        _lastCommand = command;
-        _lastCommandTime = time;
     }
 }

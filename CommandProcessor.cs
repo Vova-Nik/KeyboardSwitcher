@@ -30,84 +30,229 @@ public sealed class CommandProcessor
             $"ActiveCount={_tracker.ActiveBuffer.Count} " +
             $"PendingCount={_tracker.PendingBuffer.Count}");
 
-        if (commandEvent.Action == CommandAction.First)
+        if (commandEvent.Action == CommandAction.Single)
         {
-            if (_tracker.ActiveBuffer.IsEmpty)
-            {
-                DebugLog.Write(
-                    $"PROCESSOR: First with empty ActiveBuffer. " +
-                    $"Switching directly to {commandEvent.Command}.");
-
-                _tracker.ClearPending();
-
-                QueueLanguageSwitch(
-                    commandEvent.Command);
-
-                return;
-            }
-
-            _tracker.SaveActiveToPending();
-
-            DebugLog.Write(
-                $"PROCESSOR: First handled. " +
-                $"PendingCount={_tracker.PendingBuffer.Count} " +
-                $"PendingHkl=0x{_tracker.PendingBuffer.SourceHkl.ToInt64():X} " +
-                $"PendingHwnd=0x{_tracker.PendingBuffer.Hwnd.ToInt64():X}");
-
-            QueueLanguageSwitch(
+            ProcessSingle(
                 commandEvent.Command);
 
             return;
         }
 
-        if (commandEvent.Action != CommandAction.Second)
-            return;
+        if (commandEvent.Action == CommandAction.Double)
+        {
+            ProcessDouble(
+                commandEvent.Command);
 
-        if (_tracker.PendingBuffer.IsEmpty)
+            return;
+        }
+    }
+
+    private void ProcessSingle(
+        LayoutCommand command)
+    {
+        if (_tracker.ActiveBuffer.IsEmpty)
         {
             DebugLog.Write(
-                "PROCESSOR: Second ignored. " +
-                "PendingBuffer is empty.");
+                $"PROCESSOR: Single with empty ActiveBuffer. " +
+                $"PendingCount={_tracker.PendingBuffer.Count}. " +
+                $"Switching directly to {command}.");
+
+            // Pending НЕ очищаємо.
+            QueueLanguageSwitch(command);
 
             return;
         }
 
-        IntPtr currentHwnd =
-            GetForegroundWindow();
+        _tracker.SaveActiveToPending();
+
+        DebugLog.Write(
+            $"PROCESSOR: Single handled. " +
+            $"PendingCount={_tracker.PendingBuffer.Count} " +
+            $"PendingHkl=0x{_tracker.PendingBuffer.SourceHkl.ToInt64():X} " +
+            $"PendingHwnd=0x{_tracker.PendingBuffer.Hwnd.ToInt64():X}");
+
+        QueueLanguageSwitch(command);
+    }
+
+
+    //private void ProcessDouble(
+    //LayoutCommand command)
+    //{
+    //    DebugLog.Write(
+    //        $"PROCESSOR: Double received. " +
+    //        $"Command={command}");
+
+    //    IntPtr currentHwnd =
+    //        GetForegroundWindow();
+
+    //    DebugLog.Write(
+    //        $"PROCESSOR: Double snapshot. " +
+    //        $"CurrentHwnd=0x{currentHwnd.ToInt64():X} " +
+    //        $"PendingHwnd=0x{_tracker.PendingBuffer.Hwnd.ToInt64():X} " +
+    //        $"PendingCount={_tracker.PendingBuffer.Count}");
+
+    //    if (_tracker.PendingBuffer.IsEmpty)
+    //    {
+    //        DebugLog.Write(
+    //            "PROCESSOR: Double ignored. " +
+    //            "PendingBuffer is empty.");
+
+    //        return;
+    //    }
+
+    //    if (currentHwnd == IntPtr.Zero)
+    //    {
+    //        DebugLog.Write(
+    //            "PROCESSOR: Double ignored. " +
+    //            "ForegroundWindow is zero.");
+
+    //        return;
+    //    }
+
+    //    if (currentHwnd != _tracker.PendingBuffer.Hwnd)
+    //    {
+    //        DebugLog.Write(
+    //            $"PROCESSOR: Double ignored. " +
+    //            $"Window changed. " +
+    //            $"PendingHwnd=0x" +
+    //            $"{_tracker.PendingBuffer.Hwnd.ToInt64():X} " +
+    //            $"CurrentHwnd=0x" +
+    //            $"{currentHwnd.ToInt64():X}");
+
+    //        return;
+    //    }
+
+    //    DebugLog.Write(
+    //        $"PROCESSOR: Double accepted. " +
+    //        $"Hwnd=0x{currentHwnd.ToInt64():X}");
+
+    //    // Конвертацію поки НЕ запускаємо.
+    //}
+
+    private void ProcessDouble(LayoutCommand command)
+    {
+        DebugLog.Write(
+            $"PROCESSOR: Double received. " +
+            $"Command={command}");
+
+        IntPtr currentHwnd = GetForegroundWindow();
+
+        DebugLog.Write(
+            $"PROCESSOR: Double snapshot. " +
+            $"CurrentHwnd=0x{currentHwnd.ToInt64():X} " +
+            $"PendingHwnd=0x" +
+            $"{_tracker.PendingBuffer.Hwnd.ToInt64():X} " +
+            $"PendingCount={_tracker.PendingBuffer.Count} " +
+            $"ActiveCount={_tracker.ActiveBuffer.Count}");
 
         if (currentHwnd == IntPtr.Zero)
         {
             DebugLog.Write(
-                "PROCESSOR: Second ignored. " +
+                "PROCESSOR: Double ignored. " +
                 "ForegroundWindow is zero.");
+            return;
+        }
 
+        // If there is new active text, it becomes
+        // the new Pending text for conversion.
+        if (!_tracker.ActiveBuffer.IsEmpty)
+        {
+            DebugLog.Write(
+                $"PROCESSOR: Double has ActiveBuffer. " +
+                $"Moving Active to Pending. " +
+                $"ActiveCount={_tracker.ActiveBuffer.Count}");
+
+            _tracker.SaveActiveToPending();
+
+            DebugLog.Write(
+                $"PROCESSOR: Active moved to Pending. " +
+                $"PendingCount={_tracker.PendingBuffer.Count} " +
+                $"PendingHwnd=0x" +
+                $"{_tracker.PendingBuffer.Hwnd.ToInt64():X}");
+        }
+
+        if (_tracker.PendingBuffer.IsEmpty)
+        {
+            DebugLog.Write(
+                "PROCESSOR: Double ignored. " +
+                "PendingBuffer is empty.");
             return;
         }
 
         if (currentHwnd != _tracker.PendingBuffer.Hwnd)
         {
             DebugLog.Write(
-                $"PROCESSOR: Second ignored. " +
+                $"PROCESSOR: Double ignored. " +
                 $"Window changed. " +
-                $"PendingHwnd=0x{_tracker.PendingBuffer.Hwnd.ToInt64():X} " +
-                $"CurrentHwnd=0x{currentHwnd.ToInt64():X}");
-
+                $"PendingHwnd=0x" +
+                $"{_tracker.PendingBuffer.Hwnd.ToInt64():X} " +
+                $"CurrentHwnd=0x" +
+                $"{currentHwnd.ToInt64():X}");
             return;
         }
 
         DebugLog.Write(
-            $"PROCESSOR: Second accepted. " +
-            $"PendingHwnd=0x{_tracker.PendingBuffer.Hwnd.ToInt64():X}");
+            $"PROCESSOR: Double accepted. " +
+            $"Hwnd=0x{currentHwnd.ToInt64():X}");
 
-        ConvertPending(
-            commandEvent.Command);
+        QueuePendingConversion(
+            command,
+            currentHwnd);
     }
 
+
+    //private void QueuePendingConversion(
+    //    LayoutCommand command)
+    //{
+    //    ThreadPool.QueueUserWorkItem(
+    //        _ =>
+    //        {
+    //            DebugLog.Write(
+    //                $"PROCESSOR: Starting pending conversion. " +
+    //                $"Command={command}");
+
+    //            ConvertPending(command);
+
+    //            DebugLog.Write(
+    //                $"PROCESSOR: Pending conversion finished. " +
+    //                $"Command={command}");
+    //        });
+    //}
+
+    private void QueuePendingConversion(
+    LayoutCommand command,
+    IntPtr targetHwnd)
+    {
+        ThreadPool.QueueUserWorkItem(
+            _ =>
+            {
+                DebugLog.Write(
+                    $"PROCESSOR: Starting pending conversion. " +
+                    $"Command={command} " +
+                    $"TargetHwnd=0x{targetHwnd.ToInt64():X}");
+
+                ConvertPending(
+                    command,
+                    targetHwnd);
+
+                DebugLog.Write(
+                    $"PROCESSOR: Pending conversion finished. " +
+                    $"Command={command} " +
+                    $"TargetHwnd=0x{targetHwnd.ToInt64():X}");
+            });
+    }
     private void ConvertPending(
-        LayoutCommand command)
+        LayoutCommand command,
+        IntPtr targetHwnd)
     {
         IntPtr sourceHkl =
             _tracker.PendingBuffer.SourceHkl;
+
+        DebugLog.Write(
+            $"PROCESSOR: ConvertPending started. " +
+            $"TargetHwnd=0x{targetHwnd.ToInt64():X} " +
+            $"CurrentHwnd=0x" +
+            $"{GetForegroundWindow().ToInt64():X}");
 
         if (sourceHkl == IntPtr.Zero)
         {
@@ -164,6 +309,14 @@ public sealed class CommandProcessor
         DebugLog.Write(
             $"PROCESSOR: CONVERSION RESULT = \"{result}\"");
 
+        if (string.IsNullOrEmpty(result))
+        {
+            DebugLog.Write(
+                "PROCESSOR: Conversion produced empty result.");
+
+            return;
+        }
+
         var textReplacer =
             new TextReplacer();
 
@@ -192,12 +345,10 @@ public sealed class CommandProcessor
 
         if (inserted)
         {
-            _tracker.ClearPending();
-
             DebugLog.Write(
-                "PROCESSOR: PendingBuffer cleared.");
+                $"PROCESSOR: PendingBuffer preserved. " +
+                $"Count={_tracker.PendingBuffer.Count}");
         }
-
     }
 
     private static TestKeyboardLayout? GetTargetLayout(
@@ -262,3 +413,5 @@ public sealed class CommandProcessor
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 }
+
+//hello.це нормальною привітю ХЗ як його тестувати

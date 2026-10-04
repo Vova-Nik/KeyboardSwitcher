@@ -1,8 +1,9 @@
-﻿
-namespace KeyboardSwitcher;
+﻿namespace KeyboardSwitcher;
 
 public static class DebugLog
 {
+#if DEBUG
+
     private static readonly object _lock = new();
 
     private static readonly string _logDirectory =
@@ -18,9 +19,6 @@ public static class DebugLog
 
     static DebugLog()
     {
-    //    MessageBox.Show(
-    //$"Log path:\r\n{_logDirectory}",
-    //"TEST");
         Directory.CreateDirectory(_logDirectory);
 
         File.WriteAllText(
@@ -32,8 +30,6 @@ public static class DebugLog
     {
         lock (_lock)
         {
-            Directory.CreateDirectory(_logDirectory);
-
             File.AppendAllText(
                 _logFile,
                 $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  " +
@@ -46,11 +42,21 @@ public static class DebugLog
     {
         lock (_lock)
         {
-            Directory.CreateDirectory(_logDirectory);
-
             File.WriteAllText(
                 _logFile,
                 string.Empty);
         }
     }
+
+#else
+
+    public static void Write(string message)
+    {
+    }
+
+    public static void Clear()
+    {
+    }
+
+#endif
 }
