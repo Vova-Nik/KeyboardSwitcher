@@ -95,7 +95,10 @@ public sealed class TrayApplication : IDisposable
         _trayIcon = new NotifyIcon
         {
             Text = "KeyboardSwitcher",
-            Icon = SystemIcons.Application,
+            Icon =
+                Icon.ExtractAssociatedIcon(
+                    Application.ExecutablePath)
+                ?? SystemIcons.Application,
             Visible = true
         };
 

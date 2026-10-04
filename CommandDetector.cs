@@ -20,7 +20,7 @@ public enum CommandAction
 
 public sealed class CommandDetector
 {
-    private const long DoublePressLimitMs = 300;
+    //private const long DoublePressLimitMs = 300;
 
     private readonly object _lock = new();
 
@@ -84,7 +84,7 @@ public sealed class CommandDetector
             // Та сама команда в межах 300 мс:
             // Caps+A + Caps+A = Double.
             if (command == _pendingCommand &&
-                elapsedMs <= DoublePressLimitMs)
+               elapsedMs <= Config.DoubleClickMaxTimeMs)
             {
                 CancelTimer();
 
@@ -170,15 +170,14 @@ public sealed class CommandDetector
         _pendingCommandTime =
             timestamp;
 
-        _timer =
-            new System.Threading.Timer(
-                _ =>
-                {
-                    CompleteSingleCommand();
-                },
-                null,
-                DoublePressLimitMs,
-                Timeout.Infinite);
+        _timer = new System.Threading.Timer(
+            _ =>
+            {
+                CompleteSingleCommand();
+            },
+            null,
+            Config.DecisionPauseTimeMs,
+            Timeout.Infinite);
     }
 
     private void CompleteSingleCommand()
@@ -198,7 +197,9 @@ public sealed class CommandDetector
 
             // Захист від можливого раннього
             // спрацювання Timer.
-            if (elapsedMs < DoublePressLimitMs)
+            //if (elapsedMs < DoublePressLimitMs)
+            //    return;
+            if (elapsedMs < Config.DecisionPauseTimeMs)
                 return;
 
             LayoutCommand command =

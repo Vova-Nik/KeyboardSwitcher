@@ -7,6 +7,7 @@ internal static class Program
     [STAThread]
     static void Main()
     {
+        Config.Load();
         using Mutex mutex =
             new Mutex(
                 true,
