@@ -55,6 +55,8 @@ public sealed class TextInputTracker
         return true;
     }
 
+
+
     public void Clear()
     {
         ActiveBuffer.Clear();

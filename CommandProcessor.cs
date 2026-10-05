@@ -348,6 +348,7 @@ public sealed class CommandProcessor
             DebugLog.Write(
                 $"PROCESSOR: PendingBuffer preserved. " +
                 $"Count={_tracker.PendingBuffer.Count}");
+            QueueLanguageSwitch(command);
         }
     }
 
