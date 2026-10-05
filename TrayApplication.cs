@@ -19,7 +19,7 @@ public sealed class TrayApplication : IDisposable
     private readonly NotifyIcon _trayIcon;
     private readonly ToolStripMenuItem _startItem;
     private readonly ToolStripMenuItem _stopItem;
-
+    private ShortcutHintForm? _shortcutHint;
 
     private bool _disposed;
 
@@ -65,11 +65,6 @@ public sealed class TrayApplication : IDisposable
 
         _commandDetector.KeyPassed +=
             _collector.Process;
-
-        //_commandProcessor =
-        //    new CommandProcessor(
-        //        _tracker,
-        //        _languageSwitcher);
 
         var keyboardLayoutConverter =
             new KeyboardLayoutConverter();
@@ -174,6 +169,12 @@ public sealed class TrayApplication : IDisposable
             _keyboardHook.KeyPressed +=
                 _commandDetector.Process;
 
+            _keyboardHook.ShortcutHintRequested +=
+                ShowShortcutHint;
+
+            _keyboardHook.CapsLockReleased +=
+                HideShortcutHint;
+
             DebugLog.Write(
                 "KeyboardHook started.");
 
@@ -202,9 +203,50 @@ public sealed class TrayApplication : IDisposable
         UpdateMenu();
     }
 
+    private void ShowShortcutHint()
+    {
+        if (_shortcutHint == null ||
+            _shortcutHint.IsDisposed)
+        {
+            _shortcutHint =
+                new ShortcutHintForm();
+        }
 
+        _shortcutHint.ShowNearBottomRight();
+    }
+
+
+    private void HideShortcutHint()
+    {
+        if (_shortcutHint == null ||
+            _shortcutHint.IsDisposed)
+        {
+            return;
+        }
+
+        _shortcutHint.Hide();
+    }
+    //private void Stop()
+    //{
+    //    if (_keyboardHook == null)
+    //        return;
+
+    //    _keyboardHook.KeyPressed -=
+    //        _commandDetector.Process;
+
+    //    _keyboardHook.Dispose();
+
+    //    _keyboardHook = null;
+
+    //    DebugLog.Write(
+    //        "KeyboardHook stopped.");
+
+    //    UpdateMenu();
+    //}
     private void Stop()
     {
+        HideShortcutHint();
+
         if (_keyboardHook == null)
             return;
 
@@ -220,7 +262,6 @@ public sealed class TrayApplication : IDisposable
 
         UpdateMenu();
     }
-
 
     // ============================================================
     // CommandDetector
@@ -298,6 +339,14 @@ public sealed class TrayApplication : IDisposable
 
         _commandDetector.CommandDetected -=
             _commandProcessor.Process;
+
+        _shortcutHint?.Dispose();
+
+        _keyboardHook.ShortcutHintRequested -=
+            ShowShortcutHint;
+
+        _keyboardHook.CapsLockReleased -=
+            HideShortcutHint;
 
         Stop();
 

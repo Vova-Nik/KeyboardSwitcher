@@ -56,6 +56,18 @@ public sealed class KeyboardHook : IDisposable
     private const int LLKHF_EXTENDED = 0x01;
     private const uint LLKHF_INJECTED = 0x10;
 
+    // ------------------------------------------------------------
+    // CapsLock long-press hint
+    // ------------------------------------------------------------
+
+    private readonly System.Windows.Forms.Timer _capsHoldTimer;
+
+    private bool _capsHelpShown;
+
+    // ------------------------------------------------------------
+    // Hook
+    // ------------------------------------------------------------
+
     private delegate IntPtr LowLevelKeyboardProc(
         int nCode,
         IntPtr wParam,
@@ -93,21 +105,40 @@ public sealed class KeyboardHook : IDisposable
     private static extern short GetAsyncKeyState(
         int vKey);
 
-    //private static readonly UIntPtr ConverterMarker =
-    //    new UIntPtr(0x4B53434F4E564552UL);
-
     private readonly LowLevelKeyboardProc _proc;
 
     private IntPtr _hookHandle;
 
     private bool _capsLockHeld;
 
-    //public event Action<KeyInfo>? KeyPressed;
+    // ------------------------------------------------------------
+    // Events
+    // ------------------------------------------------------------
+
     public event Func<KeyInfo, bool>? KeyPressed;
     public event Action<KeyInfo>? KeyReleased;
 
+    // Показати підказку після 2 секунд утримання CapsLock.
+    public event Action? ShortcutHintRequested;
+
+    // CapsLock відпущений.
+    public event Action? CapsLockReleased;
+
+    // ------------------------------------------------------------
+    // Constructor
+    // ------------------------------------------------------------
+
     public KeyboardHook()
     {
+        _capsHoldTimer =
+            new System.Windows.Forms.Timer
+            {
+                Interval = 2000
+            };
+
+        _capsHoldTimer.Tick +=
+            OnCapsHoldTimerTick;
+
         _proc = HookCallback;
 
         _hookHandle = SetWindowsHookEx(
@@ -118,14 +149,21 @@ public sealed class KeyboardHook : IDisposable
 
         if (_hookHandle == IntPtr.Zero)
         {
+            _capsHoldTimer.Dispose();
+
             throw new InvalidOperationException(
                 "Не вдалося встановити keyboard hook.");
         }
     }
+
+    // ------------------------------------------------------------
+    // Hook callback
+    // ------------------------------------------------------------
+
     private IntPtr HookCallback(
-    int nCode,
-    IntPtr wParam,
-    IntPtr lParam)
+        int nCode,
+        IntPtr wParam,
+        IntPtr lParam)
     {
         if (nCode >= 0)
         {
@@ -141,11 +179,6 @@ public sealed class KeyboardHook : IDisposable
                 if (handled)
                     return (IntPtr)1;
             }
-            //else if (message == WM_KEYUP ||
-            //         message == WM_SYSKEYUP)
-            //{
-            //    HandleKeyUp(lParam);
-            //}
 
             else if (message == WM_KEYUP ||
                      message == WM_SYSKEYUP)
@@ -168,9 +201,12 @@ public sealed class KeyboardHook : IDisposable
             lParam);
     }
 
+    // ------------------------------------------------------------
+    // KeyDown
+    // ------------------------------------------------------------
 
     private bool HandleKeyDown(
-    IntPtr lParam)
+        IntPtr lParam)
     {
         KBDLLHOOKSTRUCT data =
             Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(
@@ -181,7 +217,25 @@ public sealed class KeyboardHook : IDisposable
 
         if (isCapsLock)
         {
-            _capsLockHeld = true;
+            // Не перезапускаємо timer на autorepeat CapsLock.
+            if (!_capsLockHeld)
+            {
+                _capsLockHeld = true;
+
+                _capsHelpShown = false;
+
+                _capsHoldTimer.Stop();
+                _capsHoldTimer.Start();
+            }
+        }
+        else
+        {
+            // Будь-яка інша клавіша скасовує очікування
+            // підказки після тривалого утримання CapsLock.
+            if (_capsLockHeld)
+            {
+                _capsHoldTimer.Stop();
+            }
         }
 
         bool extended =
@@ -214,14 +268,6 @@ public sealed class KeyboardHook : IDisposable
         bool handled =
             KeyPressed?.Invoke(info) ?? false;
 
-        //DebugLog.Write(
-        //    $"HOOK: KeyDown " +
-        //    $"Key={info.Key} " +
-        //    $"VK=0x{info.VirtualKey:X} " +
-        //    $"SC=0x{info.ScanCode:X} " +
-        //    $"CapsHeld={info.CapsLockHeld} " +
-        //    $"Handled={handled}");
-
         DebugLog.Write(
             $"HOOK: KeyDown " +
             $"Key={info.Key} " +
@@ -232,9 +278,11 @@ public sealed class KeyboardHook : IDisposable
             $"Handled={handled}");
 
         return handled;
-
-        //return KeyPressed?.Invoke(info) ?? false;
     }
+
+    // ------------------------------------------------------------
+    // KeyUp
+    // ------------------------------------------------------------
 
     private void HandleKeyUp(
         IntPtr lParam)
@@ -260,9 +308,8 @@ public sealed class KeyboardHook : IDisposable
 
         bool isConverterInput =
             (data.flags & LLKHF_INJECTED) != 0 &&
-            //data.dwExtraInfo == ConverterMarker;
-            data.dwExtraInfo == InputInjection.ConverterMarker;
-
+            data.dwExtraInfo ==
+                InputInjection.ConverterMarker;
 
         var info = new KeyInfo(
             (Keys)data.vkCode,
@@ -279,9 +326,40 @@ public sealed class KeyboardHook : IDisposable
 
         if (isCapsLock)
         {
+            _capsHoldTimer.Stop();
+
+            _capsHelpShown = false;
+
             _capsLockHeld = false;
+
+            CapsLockReleased?.Invoke();
         }
     }
+
+    // ------------------------------------------------------------
+    // CapsLock hold timer
+    // ------------------------------------------------------------
+
+    private void OnCapsHoldTimerTick(
+        object? sender,
+        EventArgs e)
+    {
+        _capsHoldTimer.Stop();
+
+        if (!_capsLockHeld)
+            return;
+
+        if (_capsHelpShown)
+            return;
+
+        _capsHelpShown = true;
+
+        ShortcutHintRequested?.Invoke();
+    }
+
+    // ------------------------------------------------------------
+    // Keyboard state
+    // ------------------------------------------------------------
 
     private static bool IsKeyDown(
         int virtualKey)
@@ -289,8 +367,15 @@ public sealed class KeyboardHook : IDisposable
         return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
     }
 
+    // ------------------------------------------------------------
+    // Dispose
+    // ------------------------------------------------------------
+
     public void Dispose()
     {
+        _capsHoldTimer.Stop();
+        _capsHoldTimer.Dispose();
+
         if (_hookHandle != IntPtr.Zero)
         {
             UnhookWindowsHookEx(
