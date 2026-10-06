@@ -87,4 +87,10 @@ public sealed class TextInputTracker
     {
         return ActiveBuffer.GetBuffer();
     }
+
+    public void ClearAll()
+    {
+        ActiveBuffer.Clear();
+        PendingBuffer.Clear();
+    }
 }

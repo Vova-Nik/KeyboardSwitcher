@@ -9,6 +9,8 @@ public sealed class TrayApplication : IDisposable
     private readonly LanguageSwitcher _languageSwitcher;
 
     private KeyboardHook? _keyboardHook;
+    //private readonly MouseHook _mouseHook;
+    private MouseHook? _mouseHook;
 
     private readonly TextInputTracker _tracker;
     private readonly TextInputCollector _collector;
@@ -161,10 +163,60 @@ public sealed class TrayApplication : IDisposable
         if (_keyboardHook != null)
             return;
 
+        //try
+        //{
+        //    _keyboardHook =
+        //        new KeyboardHook();
+        //    _mouseHook =
+        //        new MouseHook();
+
+        //    _mouseHook.MouseActivity +=
+        //        OnMouseActivity;
+
+        //    _keyboardHook.KeyPressed +=
+        //        _commandDetector.Process;
+
+        //    _keyboardHook.ShortcutHintRequested +=
+        //        ShowShortcutHint;
+
+        //    _keyboardHook.CapsLockReleased +=
+        //        HideShortcutHint;
+
+        //    DebugLog.Write(
+        //        "KeyboardHook started.");
+
+        //    //MessageBox.Show(
+        //    //    "TrayApplication: KeyboardHook started",
+        //    //     "TEST");
+        //}
+        //catch (Exception ex)
+        //{
+        //    DebugLog.Write(
+        //        $"KeyboardHook start failed: {ex}");
+
+        //    _keyboardHook?.Dispose();
+        //    _keyboardHook = null;
+
+        //    MessageBox.Show(
+        //        "Не вдалося встановити keyboard hook.\r\n\r\n" +
+        //        ex.Message,
+        //        "KeyboardSwitcher",
+        //        MessageBoxButtons.OK,
+        //        MessageBoxIcon.Error);
+
+        //    return;
+        //}
+
         try
         {
             _keyboardHook =
                 new KeyboardHook();
+
+            _mouseHook =
+                new MouseHook();
+
+            _mouseHook.MouseActivity +=
+                OnMouseActivity;
 
             _keyboardHook.KeyPressed +=
                 _commandDetector.Process;
@@ -174,24 +226,20 @@ public sealed class TrayApplication : IDisposable
 
             _keyboardHook.CapsLockReleased +=
                 HideShortcutHint;
-
-            DebugLog.Write(
-                "KeyboardHook started.");
-
-            //MessageBox.Show(
-            //    "TrayApplication: KeyboardHook started",
-            //     "TEST");
         }
         catch (Exception ex)
         {
             DebugLog.Write(
-                $"KeyboardHook start failed: {ex}");
+                $"Hook start failed: {ex}");
+
+            _mouseHook?.Dispose();
+            _mouseHook = null;
 
             _keyboardHook?.Dispose();
             _keyboardHook = null;
 
             MessageBox.Show(
-                "Не вдалося встановити keyboard hook.\r\n\r\n" +
+                "Не вдалося встановити keyboard/mouse hook.\r\n\r\n" +
                 ex.Message,
                 "KeyboardSwitcher",
                 MessageBoxButtons.OK,
@@ -243,22 +291,55 @@ public sealed class TrayApplication : IDisposable
 
     //    UpdateMenu();
     //}
+    //private void Stop()
+    //{
+    //    HideShortcutHint();
+
+    //    if (_keyboardHook == null)
+    //        return;
+
+    //    _keyboardHook.KeyPressed -=
+    //        _commandDetector.Process;
+
+    //    _keyboardHook.Dispose();
+
+    //    _keyboardHook = null;
+
+    //    DebugLog.Write(
+    //        "KeyboardHook stopped.");
+
+    //    UpdateMenu();
+    //}
+
     private void Stop()
     {
         HideShortcutHint();
 
-        if (_keyboardHook == null)
-            return;
+        if (_keyboardHook != null)
+        {
+            _keyboardHook.KeyPressed -=
+                _commandDetector.Process;
 
-        _keyboardHook.KeyPressed -=
-            _commandDetector.Process;
+            _keyboardHook.ShortcutHintRequested -=
+                ShowShortcutHint;
 
-        _keyboardHook.Dispose();
+            _keyboardHook.CapsLockReleased -=
+                HideShortcutHint;
 
-        _keyboardHook = null;
+            _keyboardHook.Dispose();
 
-        DebugLog.Write(
-            "KeyboardHook stopped.");
+            _keyboardHook = null;
+        }
+
+        if (_mouseHook != null)
+        {
+            _mouseHook.MouseActivity -=
+                OnMouseActivity;
+
+            _mouseHook.Dispose();
+
+            _mouseHook = null;
+        }
 
         UpdateMenu();
     }
@@ -323,6 +404,59 @@ public sealed class TrayApplication : IDisposable
         Application.Exit();
     }
 
+    private void OnMouseActivity()
+    {
+        if (_tracker.ActiveBuffer.IsEmpty &&
+            _tracker.PendingBuffer.IsEmpty)
+        {
+            return;
+        }
+
+        _tracker.ClearAll();
+
+        DebugLog.Write(
+            "MOUSE: Activity detected. " +
+            "Buffers cleared.");
+    }
+
+    //public void Dispose()
+    //{
+    //    if (_disposed)
+    //        return;
+
+    //    _disposed = true;
+
+    //    _commandDetector.CommandDetected -=
+    //        OnCommandDetected;
+
+    //    _commandDetector.KeyPassed -=
+    //        _collector.Process;
+
+    //    _commandDetector.CommandDetected -=
+    //        _commandProcessor.Process;
+
+    //    _shortcutHint?.Dispose();
+
+    //    _keyboardHook.ShortcutHintRequested -=
+    //        ShowShortcutHint;
+
+    //    _keyboardHook.CapsLockReleased -=
+    //        HideShortcutHint;
+
+    //    _mouseHook.MouseActivity -=
+    //        OnMouseActivity;
+
+    //    _mouseHook.Dispose();
+
+    //    Stop();
+
+    //    _trayIcon.Visible = false;
+    //    _trayIcon.Dispose();
+
+    //    GC.SuppressFinalize(this);
+
+
+    //}
 
     public void Dispose()
     {
@@ -340,19 +474,15 @@ public sealed class TrayApplication : IDisposable
         _commandDetector.CommandDetected -=
             _commandProcessor.Process;
 
-        _shortcutHint?.Dispose();
-
-        _keyboardHook.ShortcutHintRequested -=
-            ShowShortcutHint;
-
-        _keyboardHook.CapsLockReleased -=
-            HideShortcutHint;
-
         Stop();
+
+        _shortcutHint?.Dispose();
 
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
 
         GC.SuppressFinalize(this);
     }
+
+
 }
