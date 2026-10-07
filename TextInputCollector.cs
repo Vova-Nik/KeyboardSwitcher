@@ -29,8 +29,16 @@ public sealed class TextInputCollector
             $"Converter={info.IsConverterInput} " +
             $"BufferBefore={_tracker.Count}");
 
+        // --------------------------------------------------------
+        // Наші синтетичні події не збираємо.
+        // --------------------------------------------------------
+
         if (info.IsConverterInput)
             return;
+
+        // --------------------------------------------------------
+        // Коректуючі клавіші очищають ActiveBuffer.
+        // --------------------------------------------------------
 
         if (IsClearKey(info))
         {
@@ -44,6 +52,10 @@ public sealed class TextInputCollector
             return;
         }
 
+        // --------------------------------------------------------
+        // Модифікатори самі по собі не є текстом.
+        // --------------------------------------------------------
+
         if (IsModifier(info.Key))
             return;
 
@@ -53,12 +65,46 @@ public sealed class TextInputCollector
         if (!IsTextKey(info.Key))
             return;
 
-        var keyStroke = new KeyStroke(
-            info.ScanCode,
-            info.Extended,
-            info.Shift,
-            info.Ctrl,
-            info.Alt);
+        // --------------------------------------------------------
+        // Після явного перемикання розкладки перше слово
+        // не потрапляє до наших буферів.
+        //
+        // Пропускаємо всі клавіші до Space / comma / period
+        // та інших розділових знаків.
+        // --------------------------------------------------------
+
+        if (_tracker.IsIgnoringNextWord)
+        {
+            if (IsWordTerminator(info.Key))
+            {
+                _tracker.FinishIgnoredWord();
+
+                DebugLog.Write(
+                    $"COLLECTOR: Ignored word finished " +
+                    $"by {info.Key}. " +
+                    $"Buffering resumed.");
+            }
+            else
+            {
+                DebugLog.Write(
+                    $"COLLECTOR: Ignoring word. " +
+                    $"Key={info.Key}");
+            }
+
+            return;
+        }
+
+        // --------------------------------------------------------
+        // Збираємо звичайний текст.
+        // --------------------------------------------------------
+
+        var keyStroke =
+            new KeyStroke(
+                info.ScanCode,
+                info.Extended,
+                info.Shift,
+                info.Ctrl,
+                info.Alt);
 
         IntPtr currentHkl =
             _layoutContext.GetCurrentHkl();
@@ -75,11 +121,13 @@ public sealed class TextInputCollector
             $"COLLECTOR: Added " +
             $"Key={info.Key} " +
             $"BufferAfter={_tracker.Count} " +
-            $"SourceHkl=0x{_tracker.SourceHkl.ToInt64():X} " +
+            $"SourceHkl=0x" +
+            $"{_tracker.SourceHkl.ToInt64():X} " +
             $"Hwnd=0x{hwnd.ToInt64():X}");
     }
 
-    private static bool IsClearKey(KeyInfo info)
+    private static bool IsClearKey(
+        KeyInfo info)
     {
         return info.Key == Keys.Back ||
                info.Key == Keys.Delete ||
@@ -89,7 +137,8 @@ public sealed class TextInputCollector
                info.Key == Keys.Down;
     }
 
-    private static bool IsModifier(Keys key)
+    private static bool IsModifier(
+        Keys key)
     {
         return key == Keys.ShiftKey ||
                key == Keys.LShiftKey ||
@@ -102,19 +151,37 @@ public sealed class TextInputCollector
                key == Keys.RMenu;
     }
 
-    private static bool IsTextKey(Keys key)
+    private static bool IsWordTerminator(
+        Keys key)
+    {
+        return key == Keys.Space ||
+               key == Keys.Oemcomma ||
+               key == Keys.OemPeriod ||
+               key == Keys.OemSemicolon ||
+               key == Keys.OemQuotes ||
+               key == Keys.OemQuestion;
+    }
+
+    private static bool IsTextKey(
+        Keys key)
     {
         if (key >= Keys.A &&
             key <= Keys.Z)
+        {
             return true;
+        }
 
         if (key >= Keys.D0 &&
             key <= Keys.D9)
+        {
             return true;
+        }
 
         if (key >= Keys.NumPad0 &&
             key <= Keys.NumPad9)
+        {
             return true;
+        }
 
         switch (key)
         {

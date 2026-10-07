@@ -21,6 +21,10 @@ public sealed class CommandProcessor
         _textLayoutConverter = textLayoutConverter;
     }
 
+    // ============================================================
+    // Command processing
+    // ============================================================
+
     public void Process(CommandEvent commandEvent)
     {
         DebugLog.Write(
@@ -32,20 +36,20 @@ public sealed class CommandProcessor
 
         if (commandEvent.Action == CommandAction.Single)
         {
-            ProcessSingle(
-                commandEvent.Command);
-
+            ProcessSingle(commandEvent.Command);
             return;
         }
 
         if (commandEvent.Action == CommandAction.Double)
         {
-            ProcessDouble(
-                commandEvent.Command);
-
+            ProcessDouble(commandEvent.Command);
             return;
         }
     }
+
+    // ============================================================
+    // Single command
+    // ============================================================
 
     private void ProcessSingle(
         LayoutCommand command)
@@ -57,8 +61,9 @@ public sealed class CommandProcessor
                 $"PendingCount={_tracker.PendingBuffer.Count}. " +
                 $"Switching directly to {command}.");
 
-            // Pending НЕ очищаємо.
-            QueueLanguageSwitch(command);
+            QueueLanguageSwitch(
+                command,
+                ignoreNextWord: true);
 
             return;
         }
@@ -68,78 +73,34 @@ public sealed class CommandProcessor
         DebugLog.Write(
             $"PROCESSOR: Single handled. " +
             $"PendingCount={_tracker.PendingBuffer.Count} " +
-            $"PendingHkl=0x{_tracker.PendingBuffer.SourceHkl.ToInt64():X} " +
-            $"PendingHwnd=0x{_tracker.PendingBuffer.Hwnd.ToInt64():X}");
+            $"PendingHkl=0x" +
+            $"{_tracker.PendingBuffer.SourceHkl.ToInt64():X} " +
+            $"PendingHwnd=0x" +
+            $"{_tracker.PendingBuffer.Hwnd.ToInt64():X}");
 
-        QueueLanguageSwitch(command);
+        QueueLanguageSwitch(
+            command,
+            ignoreNextWord: true);
     }
 
+    // ============================================================
+    // Double command
+    // ============================================================
 
-    //private void ProcessDouble(
-    //LayoutCommand command)
-    //{
-    //    DebugLog.Write(
-    //        $"PROCESSOR: Double received. " +
-    //        $"Command={command}");
-
-    //    IntPtr currentHwnd =
-    //        GetForegroundWindow();
-
-    //    DebugLog.Write(
-    //        $"PROCESSOR: Double snapshot. " +
-    //        $"CurrentHwnd=0x{currentHwnd.ToInt64():X} " +
-    //        $"PendingHwnd=0x{_tracker.PendingBuffer.Hwnd.ToInt64():X} " +
-    //        $"PendingCount={_tracker.PendingBuffer.Count}");
-
-    //    if (_tracker.PendingBuffer.IsEmpty)
-    //    {
-    //        DebugLog.Write(
-    //            "PROCESSOR: Double ignored. " +
-    //            "PendingBuffer is empty.");
-
-    //        return;
-    //    }
-
-    //    if (currentHwnd == IntPtr.Zero)
-    //    {
-    //        DebugLog.Write(
-    //            "PROCESSOR: Double ignored. " +
-    //            "ForegroundWindow is zero.");
-
-    //        return;
-    //    }
-
-    //    if (currentHwnd != _tracker.PendingBuffer.Hwnd)
-    //    {
-    //        DebugLog.Write(
-    //            $"PROCESSOR: Double ignored. " +
-    //            $"Window changed. " +
-    //            $"PendingHwnd=0x" +
-    //            $"{_tracker.PendingBuffer.Hwnd.ToInt64():X} " +
-    //            $"CurrentHwnd=0x" +
-    //            $"{currentHwnd.ToInt64():X}");
-
-    //        return;
-    //    }
-
-    //    DebugLog.Write(
-    //        $"PROCESSOR: Double accepted. " +
-    //        $"Hwnd=0x{currentHwnd.ToInt64():X}");
-
-    //    // Конвертацію поки НЕ запускаємо.
-    //}
-
-    private void ProcessDouble(LayoutCommand command)
+    private void ProcessDouble(
+        LayoutCommand command)
     {
         DebugLog.Write(
             $"PROCESSOR: Double received. " +
             $"Command={command}");
 
-        IntPtr currentHwnd = GetForegroundWindow();
+        IntPtr currentHwnd =
+            GetForegroundWindow();
 
         DebugLog.Write(
             $"PROCESSOR: Double snapshot. " +
-            $"CurrentHwnd=0x{currentHwnd.ToInt64():X} " +
+            $"CurrentHwnd=0x" +
+            $"{currentHwnd.ToInt64():X} " +
             $"PendingHwnd=0x" +
             $"{_tracker.PendingBuffer.Hwnd.ToInt64():X} " +
             $"PendingCount={_tracker.PendingBuffer.Count} " +
@@ -150,11 +111,15 @@ public sealed class CommandProcessor
             DebugLog.Write(
                 "PROCESSOR: Double ignored. " +
                 "ForegroundWindow is zero.");
+
             return;
         }
 
-        // If there is new active text, it becomes
-        // the new Pending text for conversion.
+        // --------------------------------------------------------
+        // Якщо є новий Active текст —
+        // він стає новим Pending для конвертації.
+        // --------------------------------------------------------
+
         if (!_tracker.ActiveBuffer.IsEmpty)
         {
             DebugLog.Write(
@@ -176,10 +141,12 @@ public sealed class CommandProcessor
             DebugLog.Write(
                 "PROCESSOR: Double ignored. " +
                 "PendingBuffer is empty.");
+
             return;
         }
 
-        if (currentHwnd != _tracker.PendingBuffer.Hwnd)
+        if (currentHwnd !=
+            _tracker.PendingBuffer.Hwnd)
         {
             DebugLog.Write(
                 $"PROCESSOR: Double ignored. " +
@@ -188,6 +155,7 @@ public sealed class CommandProcessor
                 $"{_tracker.PendingBuffer.Hwnd.ToInt64():X} " +
                 $"CurrentHwnd=0x" +
                 $"{currentHwnd.ToInt64():X}");
+
             return;
         }
 
@@ -200,28 +168,13 @@ public sealed class CommandProcessor
             currentHwnd);
     }
 
-
-    //private void QueuePendingConversion(
-    //    LayoutCommand command)
-    //{
-    //    ThreadPool.QueueUserWorkItem(
-    //        _ =>
-    //        {
-    //            DebugLog.Write(
-    //                $"PROCESSOR: Starting pending conversion. " +
-    //                $"Command={command}");
-
-    //            ConvertPending(command);
-
-    //            DebugLog.Write(
-    //                $"PROCESSOR: Pending conversion finished. " +
-    //                $"Command={command}");
-    //        });
-    //}
+    // ============================================================
+    // Pending conversion
+    // ============================================================
 
     private void QueuePendingConversion(
-    LayoutCommand command,
-    IntPtr targetHwnd)
+        LayoutCommand command,
+        IntPtr targetHwnd)
     {
         ThreadPool.QueueUserWorkItem(
             _ =>
@@ -229,7 +182,8 @@ public sealed class CommandProcessor
                 DebugLog.Write(
                     $"PROCESSOR: Starting pending conversion. " +
                     $"Command={command} " +
-                    $"TargetHwnd=0x{targetHwnd.ToInt64():X}");
+                    $"TargetHwnd=0x" +
+                    $"{targetHwnd.ToInt64():X}");
 
                 ConvertPending(
                     command,
@@ -238,21 +192,24 @@ public sealed class CommandProcessor
                 DebugLog.Write(
                     $"PROCESSOR: Pending conversion finished. " +
                     $"Command={command} " +
-                    $"TargetHwnd=0x{targetHwnd.ToInt64():X}");
+                    $"TargetHwnd=0x" +
+                    $"{targetHwnd.ToInt64():X}");
             });
     }
+
     private void ConvertPending(
         LayoutCommand command,
         IntPtr targetHwnd)
     {
-        IntPtr sourceHkl =
-            _tracker.PendingBuffer.SourceHkl;
-
         DebugLog.Write(
             $"PROCESSOR: ConvertPending started. " +
-            $"TargetHwnd=0x{targetHwnd.ToInt64():X} " +
+            $"TargetHwnd=0x" +
+            $"{targetHwnd.ToInt64():X} " +
             $"CurrentHwnd=0x" +
             $"{GetForegroundWindow().ToInt64():X}");
+
+        IntPtr sourceHkl =
+            _tracker.PendingBuffer.SourceHkl;
 
         if (sourceHkl == IntPtr.Zero)
         {
@@ -268,14 +225,16 @@ public sealed class CommandProcessor
 
         TestKeyboardLayout? sourceLayout =
             layouts.FirstOrDefault(
-                layout => layout.Hkl == sourceHkl);
+                layout =>
+                    layout.Hkl == sourceHkl);
 
         if (sourceLayout == null)
         {
             DebugLog.Write(
                 $"PROCESSOR: Conversion failed. " +
                 $"Source layout not found. " +
-                $"HKL=0x{sourceHkl.ToInt64():X}");
+                $"HKL=0x" +
+                $"{sourceHkl.ToInt64():X}");
 
             return;
         }
@@ -324,7 +283,8 @@ public sealed class CommandProcessor
             _tracker.PendingBuffer.Count;
 
         bool deleted =
-            textReplacer.DeleteCharacters(count);
+            textReplacer.DeleteCharacters(
+                count);
 
         DebugLog.Write(
             $"PROCESSOR: DELETE RESULT = {deleted}");
@@ -338,7 +298,8 @@ public sealed class CommandProcessor
         }
 
         bool inserted =
-            textReplacer.InsertText(result);
+            textReplacer.InsertText(
+                result);
 
         DebugLog.Write(
             $"PROCESSOR: INSERT RESULT = {inserted}");
@@ -348,9 +309,18 @@ public sealed class CommandProcessor
             DebugLog.Write(
                 $"PROCESSOR: PendingBuffer preserved. " +
                 $"Count={_tracker.PendingBuffer.Count}");
-            QueueLanguageSwitch(command);
+
+            // Після конвертації встановлюємо цільову розкладку.
+            // Але наступне слово НЕ пропускаємо.
+            QueueLanguageSwitch(
+                command,
+                ignoreNextWord: false);
         }
     }
+
+    // ============================================================
+    // Target layout
+    // ============================================================
 
     private static TestKeyboardLayout? GetTargetLayout(
         IReadOnlyList<TestKeyboardLayout> layouts,
@@ -359,10 +329,17 @@ public sealed class CommandProcessor
         string prefix =
             command switch
             {
-                LayoutCommand.English => "en-",
-                LayoutCommand.Russian => "ru-",
-                LayoutCommand.Ukrainian => "uk-",
-                _ => ""
+                LayoutCommand.English =>
+                    "en-",
+
+                LayoutCommand.Russian =>
+                    "ru-",
+
+                LayoutCommand.Ukrainian =>
+                    "uk-",
+
+                _ =>
+                    ""
             };
 
         if (string.IsNullOrEmpty(prefix))
@@ -375,8 +352,13 @@ public sealed class CommandProcessor
                     StringComparison.OrdinalIgnoreCase));
     }
 
+    // ============================================================
+    // Language switching
+    // ============================================================
+
     private void QueueLanguageSwitch(
-        LayoutCommand command)
+        LayoutCommand command,
+        bool ignoreNextWord)
     {
         ThreadPool.QueueUserWorkItem(
             _ =>
@@ -385,11 +367,48 @@ public sealed class CommandProcessor
                     $"PROCESSOR: Starting language switch. " +
                     $"Command={command}");
 
+                KeyboardLayout? layoutBefore =
+                    _languageSwitcher.CurrentLayout;
+
+                IntPtr hklBefore =
+                    layoutBefore?.Hkl ??
+                    IntPtr.Zero;
+
                 bool switched =
-                    SwitchToCommandLayout(command);
+                    SwitchToCommandLayout(
+                        command);
+
+                KeyboardLayout? layoutAfter =
+                    _languageSwitcher.CurrentLayout;
+
+                IntPtr hklAfter =
+                    layoutAfter?.Hkl ??
+                    IntPtr.Zero;
 
                 DebugLog.Write(
-                    $"PROCESSOR: Switch result = {switched}");
+                    $"PROCESSOR: Switch result = {switched} " +
+                    $"HKL before=0x" +
+                    $"{hklBefore.ToInt64():X} " +
+                    $"after=0x" +
+                    $"{hklAfter.ToInt64():X}");
+
+                // ------------------------------------------------
+                // Пропускаємо наступне слово тільки для Single,
+                // якщо ми дійсно змінили HKL.
+                // ------------------------------------------------
+
+                if (ignoreNextWord &&
+                    switched &&
+                    hklBefore != IntPtr.Zero &&
+                    hklAfter != IntPtr.Zero &&
+                    hklBefore != hklAfter)
+                {
+                    _tracker.BeginIgnoreNextWord();
+
+                    DebugLog.Write(
+                        "PROCESSOR: " +
+                        "Next word will be ignored.");
+                }
             });
     }
 
@@ -407,12 +426,11 @@ public sealed class CommandProcessor
             LayoutCommand.Ukrainian =>
                 _languageSwitcher.SwitchToUkrainian(),
 
-            _ => false
+            _ =>
+                false
         };
     }
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 }
-
-//hello.це нормальною привітю ХЗ як його тестувати

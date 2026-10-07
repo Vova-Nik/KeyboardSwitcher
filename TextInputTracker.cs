@@ -14,6 +14,41 @@ public sealed class TextInputTracker
     public IntPtr SourceHkl =>
         ActiveBuffer.SourceHkl;
 
+    // ------------------------------------------------------------
+    // Стан пропуску наступного слова.
+    //
+    // Встановлюється після явного перемикання розкладки.
+    // ------------------------------------------------------------
+
+    //private bool _ignoreNextWord;
+
+    //public bool IgnoreNextWord =>
+    //    _ignoreNextWord;
+
+    //public void IgnoreNextWord()
+    //{
+    //    _ignoreNextWord = true;
+    //}
+
+    private bool _ignoreNextWord;
+
+    public bool IsIgnoringNextWord =>
+        _ignoreNextWord;
+
+    public void BeginIgnoreNextWord()
+    {
+        _ignoreNextWord = true;
+    }
+
+    public void FinishIgnoredWord()
+    {
+        _ignoreNextWord = false;
+    }
+
+    // ------------------------------------------------------------
+    // Input
+    // ------------------------------------------------------------
+
     public bool Add(
         KeyStroke keyStroke,
         IntPtr currentHkl,
@@ -55,7 +90,9 @@ public sealed class TextInputTracker
         return true;
     }
 
-
+    // ------------------------------------------------------------
+    // Clear
+    // ------------------------------------------------------------
 
     public void Clear()
     {
@@ -66,6 +103,18 @@ public sealed class TextInputTracker
     {
         PendingBuffer.Clear();
     }
+
+    public void ClearAll()
+    {
+        ActiveBuffer.Clear();
+        PendingBuffer.Clear();
+
+        _ignoreNextWord = false;
+    }
+
+    // ------------------------------------------------------------
+    // Pending
+    // ------------------------------------------------------------
 
     public void SaveActiveToPending()
     {
@@ -86,11 +135,5 @@ public sealed class TextInputTracker
     public IReadOnlyList<KeyStroke> GetBuffer()
     {
         return ActiveBuffer.GetBuffer();
-    }
-
-    public void ClearAll()
-    {
-        ActiveBuffer.Clear();
-        PendingBuffer.Clear();
     }
 }
